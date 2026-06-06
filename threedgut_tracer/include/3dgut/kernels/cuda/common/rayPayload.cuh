@@ -30,6 +30,7 @@ struct RayPayload {
     float hitT;
     float depthInitT;
     float transmittance;
+    tcnn::vec4 gggsDebug;
     tcnn::vec3 normal;
     enum {
         Default = 0,
@@ -91,6 +92,7 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
     ray.hitT          = 0.0f;
     ray.depthInitT    = 0.0f;
     ray.transmittance = 1.0f;
+    ray.gggsDebug     = tcnn::vec4::zero();
     ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
 
@@ -129,6 +131,7 @@ __device__ __inline__ RayPayloadT initializeRayPerPixel(const threedgut::RenderP
     ray.hitT          = 0.0f;
     ray.depthInitT    = 0.0f;
     ray.transmittance = 1.0f;
+    ray.gggsDebug     = tcnn::vec4::zero();
     ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
 
@@ -156,6 +159,7 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
                                        float* __restrict__ worldCountPtr,
                                        float* __restrict__ worldHitDistancePtr,
                                        tcnn::vec3* __restrict__ worldNormalPtr,
+                                       tcnn::vec4* __restrict__ worldGGGSDebugPtr,
                                        tcnn::vec4* __restrict__ radianceDensityPtr,
                                        const tcnn::mat4x3& sensorToWorldTransform) {
     if (!ray.isValid()) {
@@ -165,6 +169,9 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
     radianceDensityPtr[ray.idx] = {ray.features[0], ray.features[1], ray.features[2], (1.0f - ray.transmittance)};
 
     worldHitDistancePtr[ray.idx] = ray.hitT;
+    if (worldGGGSDebugPtr != nullptr) {
+        worldGGGSDebugPtr[ray.idx] = ray.gggsDebug;
+    }
     if (worldNormalPtr != nullptr) {
         const float alpha = 1.0f - ray.transmittance;
         worldNormalPtr[ray.idx] = alpha > 1.0e-6f ? ray.normal / alpha : tcnn::vec3::zero();

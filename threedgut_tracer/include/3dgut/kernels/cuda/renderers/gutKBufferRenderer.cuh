@@ -267,7 +267,6 @@ struct GUTKBufferRenderer : Params {
                                                         const uint32_t* __restrict__ sortedTileParticleIdxPtr,
                                                         const float depth) {
         float logTransmittance = 0.0f;
-        const float nearDepth  = ray.tMinMax.x;
 
         for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
             const uint32_t particleIdx = sortedTileParticleIdxPtr[sortedIndex];
@@ -286,8 +285,7 @@ struct GUTKBufferRenderer : Params {
                 continue;
             }
 
-            logTransmittance += particles.gggsDepthProfileLogS(profile, depth) -
-                                particles.gggsDepthProfileLogS(profile, nearDepth);
+            logTransmittance += particles.gggsDepthProfileLogS(profile, depth);
         }
 
         return logTransmittance;
@@ -337,7 +335,14 @@ struct GUTKBufferRenderer : Params {
         constexpr float MinTransmittanceForDepth = 0.45f;
         constexpr int Split = 8;
         constexpr int SplitIterations = 5;
-        if (ray.transmittance > MinTransmittanceForDepth || ray.depthInitT <= ray.tMinMax.x) {
+        ray.gggsDebug = {ray.depthInitT, ray.transmittance, 0.0f, 0.0f};
+        if (ray.depthInitT <= ray.tMinMax.x) {
+            ray.gggsDebug.z = 1.0f;
+            ray.hitT = 0.0f;
+            return;
+        }
+        if (ray.transmittance > MinTransmittanceForDepth) {
+            ray.gggsDebug.z = 2.0f;
             ray.hitT = 0.0f;
             return;
         }
@@ -345,6 +350,7 @@ struct GUTKBufferRenderer : Params {
         float lo = fmaxf(ray.depthInitT - SampleRange, ray.tMinMax.x);
         float hi = fminf(ray.depthInitT + SampleRange, ray.tMinMax.y);
         if (hi <= lo) {
+            ray.gggsDebug.z = 1.0f;
             ray.hitT = 0.0f;
             return;
         }
@@ -360,6 +366,7 @@ struct GUTKBufferRenderer : Params {
             }
 
             if ((logT[0] < LogHalf) || (logT[Split] > LogHalf)) {
+                ray.gggsDebug.z = logT[0] < LogHalf ? 3.0f : 4.0f;
                 ray.hitT = 0.0f;
                 return;
             }
@@ -378,6 +385,8 @@ struct GUTKBufferRenderer : Params {
         const float logHi = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, hi);
         const float wHi = fminf(fmaxf((logLo - LogHalf) / fmaxf(logLo - logHi, 1.0e-7f), 0.0f), 1.0f);
         ray.hitT = wHi * hi + (1.0f - wHi) * lo;
+        ray.gggsDebug.z = 0.0f;
+        ray.gggsDebug.w = ray.hitT - ray.depthInitT;
     }
 
     template <typename TRay>

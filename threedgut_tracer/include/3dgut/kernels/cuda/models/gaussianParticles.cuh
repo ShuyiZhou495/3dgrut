@@ -554,7 +554,7 @@ __device__ inline void processGGGSDepthBwd(
     float minHitDistance,
     float maxHitDistance,
     float depth,
-    float nearDepth,
+    float /*nearDepth*/,
     float gamma) {
     if ((depth <= minHitDistance) || (depth >= maxHitDistance) || (gamma == 0.0f)) {
         return;
@@ -589,7 +589,6 @@ __device__ inline void processGGGSDepthBwd(
     float3 grduGrad = make_float3(0.0f);
     float densityGrad = 0.0f;
     addGGGSLogSGradient<ParticleKernelDegree>(gro, grdu, tPeak, particleData.density, depth, gamma, groGrad, grduGrad, densityGrad);
-    addGGGSLogSGradient<ParticleKernelDegree>(gro, grdu, tPeak, particleData.density, nearDepth, -gamma, groGrad, grduGrad, densityGrad);
 
     particleDensityGradPtr->density += densityGrad;
 

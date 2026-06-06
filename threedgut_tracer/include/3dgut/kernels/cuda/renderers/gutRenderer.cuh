@@ -89,6 +89,7 @@ __global__ void render(threedgut::RenderParameters params,
                        float* __restrict__ worldHitCountPtr,
                        float* __restrict__ worldHitDistancePtr,
                        tcnn::vec3* __restrict__ worldNormalPtr,
+                       tcnn::vec4* __restrict__ worldGGGSDebugPtr,
                        tcnn::vec4* __restrict__ radianceDensityPtr,
                        const tcnn::vec2* __restrict__ particlesProjectedPositionPtr,
                        const tcnn::vec4* __restrict__ particlesProjectedConicOpacityPtr,
@@ -112,7 +113,7 @@ __global__ void render(threedgut::RenderParameters params,
     // TGUTModel::eval(params, ray, {parameterMemoryHandles});
 
     // NB : finalize ray is not differentiable (has to be no-op when used in a differentiable renderer)
-    finalizeRay(ray, params, sensorRayOriginPtr, worldHitCountPtr, worldHitDistancePtr, worldNormalPtr, radianceDensityPtr, sensorToWorldTransform);
+    finalizeRay(ray, params, sensorRayOriginPtr, worldHitCountPtr, worldHitDistancePtr, worldNormalPtr, worldGGGSDebugPtr, radianceDensityPtr, sensorToWorldTransform);
 }
 
 #if FINE_GRAINED_LOAD_BALANCING
@@ -126,6 +127,7 @@ __global__ void renderBalanced(threedgut::RenderParameters params,
                                float* __restrict__ worldHitCountPtr,
                                float* __restrict__ worldHitDistancePtr,
                                tcnn::vec3* __restrict__ worldNormalPtr,
+                               tcnn::vec4* __restrict__ worldGGGSDebugPtr,
                                tcnn::vec4* __restrict__ radianceDensityPtr,
                                const tcnn::vec2* __restrict__ particlesProjectedPositionPtr,
                                const tcnn::vec4* __restrict__ particlesProjectedConicOpacityPtr,
@@ -212,7 +214,7 @@ __global__ void renderBalanced(threedgut::RenderParameters params,
         // Only lane 0 should write, as only it has accumulated the correct values
         if (laneId == 0) {
             finalizeRay(ray, params, sensorRayOriginPtr, worldHitCountPtr,
-                        worldHitDistancePtr, worldNormalPtr, radianceDensityPtr, sensorToWorldTransform);
+                        worldHitDistancePtr, worldNormalPtr, worldGGGSDebugPtr, radianceDensityPtr, sensorToWorldTransform);
         }
     }
 }
