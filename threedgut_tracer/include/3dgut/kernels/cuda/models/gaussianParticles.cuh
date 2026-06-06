@@ -481,6 +481,136 @@ __device__ inline float gggsRayProfileLogS(const GGGSRayProfile& profile, const 
     return t <= profile.tPeak ? logV : 2.0f * logVp - logV;
 }
 
+template <int ParticleKernelDegree = 4>
+__device__ inline float gggsRayProfileDLogSDt(const GGGSRayProfile& profile, const float t) {
+    constexpr float Eps = 1.0e-6f;
+    const float dt      = t - profile.tPeak;
+    const float d2      = profile.d2Min + profile.A * dt * dt;
+    const float gres    = particleResponse<ParticleKernelDegree>(d2);
+    const float G       = gres * profile.density;
+    if (G >= 0.99f) {
+        return 0.0f;
+    }
+    const float dGdD2    = profile.density * particleResponseGrd<ParticleKernelDegree>(d2, gres, 1.0f);
+    const float dD2Dt    = 2.0f * profile.A * dt;
+    const float dLogVDt  = -0.5f * dGdD2 * dD2Dt / fmaxf(Eps, 1.0f - G);
+    return t <= profile.tPeak ? dLogVDt : -dLogVDt;
+}
+
+template <int ParticleKernelDegree = 4>
+__device__ inline void addGGGSLogVGradient(
+    const float3& q,
+    const float t,
+    const float density,
+    const float beta,
+    float3& groGrad,
+    float3& grduGrad,
+    float& densityGrad) {
+    constexpr float Eps = 1.0e-6f;
+    const float d2      = dot(q, q);
+    const float gres    = particleResponse<ParticleKernelDegree>(d2);
+    const float G       = gres * density;
+    if (G >= 0.99f) {
+        return;
+    }
+
+    const float dLogVdG = -0.5f / fmaxf(Eps, 1.0f - G);
+    const float dLdG    = beta * dLogVdG;
+    densityGrad += dLdG * gres;
+
+    const float dLdD2 = particleResponseGrd<ParticleKernelDegree>(d2, gres, dLdG * density);
+    const float3 qGrad = 2.0f * q * dLdD2;
+    groGrad += qGrad;
+    grduGrad += t * qGrad;
+}
+
+template <int ParticleKernelDegree = 4>
+__device__ inline void addGGGSLogSGradient(
+    const float3& gro,
+    const float3& grdu,
+    const float tPeak,
+    const float density,
+    const float t,
+    const float beta,
+    float3& groGrad,
+    float3& grduGrad,
+    float& densityGrad) {
+    if (t <= tPeak) {
+        addGGGSLogVGradient<ParticleKernelDegree>(gro + t * grdu, t, density, beta, groGrad, grduGrad, densityGrad);
+    } else {
+        addGGGSLogVGradient<ParticleKernelDegree>(gro + tPeak * grdu, tPeak, density, 2.0f * beta, groGrad, grduGrad, densityGrad);
+        addGGGSLogVGradient<ParticleKernelDegree>(gro + t * grdu, t, density, -beta, groGrad, grduGrad, densityGrad);
+    }
+}
+
+template <int ParticleKernelDegree = 4>
+__device__ inline void processGGGSDepthBwd(
+    const float3& rayOrigin,
+    const float3& rayDirection,
+    const ParticleDensity& particleData,
+    ParticleDensity* particleDensityGradPtr,
+    float minParticleKernelDensity,
+    float minParticleAlpha,
+    float minHitDistance,
+    float maxHitDistance,
+    float depth,
+    float nearDepth,
+    float gamma) {
+    if ((depth <= minHitDistance) || (depth >= maxHitDistance) || (gamma == 0.0f)) {
+        return;
+    }
+
+    float33 particleRotation;
+    quaternionWXYZToMatrix(particleData.quaternion, particleRotation);
+
+    const float3 gscl    = particleData.scale;
+    const float3 giscl   = make_float3(1 / gscl.x, 1 / gscl.y, 1 / gscl.z);
+    const float3 gposc   = rayOrigin - particleData.position;
+    const float3 gposcr  = gposc * particleRotation;
+    const float3 gro     = giscl * gposcr;
+    const float3 rayDirR = rayDirection * particleRotation;
+    const float3 grdu    = giscl * rayDirR;
+
+    const float A = dot(grdu, grdu);
+    if (A <= 1.0e-12f) {
+        return;
+    }
+    const float B      = dot(gro, grdu);
+    const float tPeak  = -B / A;
+    const float d2Min  = fmaxf(0.0f, dot(gro, gro) - B * B / A);
+    const float gres   = particleResponse<ParticleKernelDegree>(d2Min);
+    const float galpha = fminf(0.99f, gres * particleData.density);
+    if ((tPeak <= minHitDistance) || (tPeak >= maxHitDistance) ||
+        (gres <= minParticleKernelDensity) || (galpha <= minParticleAlpha)) {
+        return;
+    }
+
+    float3 groGrad  = make_float3(0.0f);
+    float3 grduGrad = make_float3(0.0f);
+    float densityGrad = 0.0f;
+    addGGGSLogSGradient<ParticleKernelDegree>(gro, grdu, tPeak, particleData.density, depth, gamma, groGrad, grduGrad, densityGrad);
+    addGGGSLogSGradient<ParticleKernelDegree>(gro, grdu, tPeak, particleData.density, nearDepth, -gamma, groGrad, grduGrad, densityGrad);
+
+    particleDensityGradPtr->density += densityGrad;
+
+    const float3 gsclGradGro  = (-gposcr / (gscl * gscl)) * groGrad;
+    const float3 gposcrGrad   = giscl * groGrad;
+    const float3 gposcGrad    = matmul_bw_vec(particleRotation, gposcrGrad);
+    const float4 grotGradPos  = matmul_bw_quat(gposc, gposcrGrad, particleData.quaternion);
+
+    particleDensityGradPtr->position += -gposcGrad;
+
+    const float3 gsclGradGrdu = (-rayDirR / (gscl * gscl)) * grduGrad;
+    const float3 rayDirRGrad  = giscl * grduGrad;
+    const float4 grotGradDir  = matmul_bw_quat(rayDirection, rayDirRGrad, particleData.quaternion);
+
+    particleDensityGradPtr->scale += gsclGradGro + gsclGradGrdu;
+    particleDensityGradPtr->quaternion.x += grotGradPos.x + grotGradDir.x;
+    particleDensityGradPtr->quaternion.y += grotGradPos.y + grotGradDir.y;
+    particleDensityGradPtr->quaternion.z += grotGradPos.z + grotGradDir.z;
+    particleDensityGradPtr->quaternion.w += grotGradPos.w + grotGradDir.w;
+}
+
 __device__ inline bool intersectCustomParticle(
     const float3& rayOrigin,
     const float3& rayDirection,

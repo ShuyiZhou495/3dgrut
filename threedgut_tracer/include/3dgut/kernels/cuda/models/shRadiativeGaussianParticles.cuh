@@ -128,6 +128,11 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
         return threedgut::gggsRayProfileLogS<ExtParams::KernelDegree>(profile, depth);
     }
 
+    __forceinline__ __device__ float gggsDepthProfileDLogSDt(const threedgut::GGGSRayProfile& profile,
+                                                             float depth) const {
+        return threedgut::gggsRayProfileDLogSDt<ExtParams::KernelDegree>(profile, depth);
+    }
+
     __forceinline__ __device__ float densityIntegrateHit(float alpha,
                                                          float& transmittance,
                                                          float depth,
@@ -427,6 +432,29 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
             hitTBackward,
             hitT,
             hitTGradient);
+    }
+
+    __forceinline__ __device__ void processGGGSDepthBwd(const tcnn::vec3& rayOrigin,
+                                                        const tcnn::vec3& rayDirection,
+                                                        const DensityRawParameters& densityRawParameters,
+                                                        DensityRawParameters* densityRawParametersGrad,
+                                                        float minHitDistance,
+                                                        float maxHitDistance,
+                                                        float depth,
+                                                        float nearDepth,
+                                                        float gamma) const {
+        threedgut::processGGGSDepthBwd<ExtParams::KernelDegree>(
+            reinterpret_cast<const float3&>(rayOrigin),
+            reinterpret_cast<const float3&>(rayDirection),
+            reinterpret_cast<const threedgut::ParticleDensity&>(densityRawParameters),
+            reinterpret_cast<threedgut::ParticleDensity*>(densityRawParametersGrad),
+            ExtParams::MinParticleKernelDensity,
+            ExtParams::AlphaThreshold,
+            minHitDistance,
+            maxHitDistance,
+            depth,
+            nearDepth,
+            gamma);
     }
 
     template <bool synchedThread = true>
