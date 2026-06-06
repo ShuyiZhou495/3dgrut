@@ -157,6 +157,9 @@ SplatRaster::SplatRaster(const nlohmann::json& config)
 
     const auto& renderConfig = config["render"];
     m_enableKernelTimings    = renderConfig.value("enable_kernel_timings", false);
+    const std::string depthMode = renderConfig.value("depth_mode", "expected");
+    m_depthMode = depthMode == "gggs" ? threedgut::RenderParameters::GGGSMedianDepth
+                                      : threedgut::RenderParameters::ExpectedDepth;
 
     m_parameters.valuesBuffer.resize(sizeof(m_parameters.values), 0, m_logger);
     m_parameters.parametersBuffer.resize(sizeof(m_parameters.parameters), 0, m_logger);
@@ -196,6 +199,7 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
     torch::Tensor rayRadianceDensity = torch::zeros({height, width, 4}, opts);
     torch::Tensor rayHitDistance     = torch::ones({height, width, 1}, opts).multiply(1e06f);
     torch::Tensor rayHitCount        = torch::zeros({height, width, 1}, opts);
+    torch::Tensor rayNormal          = torch::zeros({height, width, 3}, opts);
     torch::Tensor particleVisibility = torch::zeros({numParticles, 1}, opts);
 
     m_parameters.values.numParticles               = numParticles;
@@ -218,6 +222,7 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
     threedgut::RenderParameters renderParameters;
     renderParameters.id          = frameNumber;
     renderParameters.resolution  = tcnn::ivec2{width, height};
+    renderParameters.depthMode   = m_depthMode;
     renderParameters.sensorModel = sensorModel;
     renderParameters.sensorState = toSensorState(startTimestamp, sensorsStartPose, endTimestamp, sensorsEndPose);
     renderParameters.objectAABB  = threedgut::BoundingBox{tcnn::vec3{-1e06f, -1e06f, -1e06f}, tcnn::vec3{1e06f, 1e06f, 1e06f}};
@@ -228,6 +233,7 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
         reinterpret_cast<const tcnn::vec3*>(voidDataPtr(rayDirection)),
         reinterpret_cast<float*>(voidDataPtr(rayHitCount)),
         reinterpret_cast<float*>(voidDataPtr(rayHitDistance)),
+        reinterpret_cast<tcnn::vec3*>(voidDataPtr(rayNormal)),
         reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayRadianceDensity)),
         reinterpret_cast<int*>(voidDataPtr(particleVisibility)),
         m_parameters,
@@ -240,7 +246,7 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
         timer->stop();
     }
 
-    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayRadianceDensity, rayHitDistance, rayHitCount, particleVisibility);
+    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(rayRadianceDensity, rayHitDistance, rayHitCount, rayNormal, particleVisibility);
 }
 
 std::tuple<torch::Tensor, torch::Tensor>
@@ -306,6 +312,7 @@ SplatRaster::traceBwd(uint32_t frameNumber, int numActiveFeatures,
     threedgut::RenderParameters renderParameters;
     renderParameters.id          = frameNumber;
     renderParameters.resolution  = tcnn::ivec2{width, height};
+    renderParameters.depthMode   = m_depthMode;
     renderParameters.sensorModel = sensorModel;
     renderParameters.sensorState = toSensorState(startTimestamp, sensorsStartPose, endTimestamp, sensorsEndPose);
     renderParameters.objectAABB  = threedgut::BoundingBox{tcnn::vec3{-1e06f, -1e06f, -1e06f}, tcnn::vec3{1e06f, 1e06f, 1e06f}};

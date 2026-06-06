@@ -185,7 +185,7 @@ class Tracer:
                 * sensor_poses.timestamps_us[0]
             )
 
-            ray_radiance_density, ray_hit_distance, ray_hit_count, mog_visibility = tracer_wrapper.trace(
+            ray_radiance_density, ray_hit_distance, ray_hit_count, ray_normal, mog_visibility = tracer_wrapper.trace(
                 frame_id,
                 n_active_features,
                 particle_density,

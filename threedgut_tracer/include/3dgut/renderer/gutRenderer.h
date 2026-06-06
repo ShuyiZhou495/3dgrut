@@ -67,6 +67,7 @@ public:
                          const tcnn::vec3* sensorRayDirectionCudaPtr,
                          float* worldHitCountCudaPtr,
                          float* worldHitDistanceCudaPtr,
+                         tcnn::vec3* worldNormalCudaPtr,
                          tcnn::vec4* radianceDensityCudaPtr,
                          int* particlesVisibilityCudaPtr,
                          Parameters& parameters,

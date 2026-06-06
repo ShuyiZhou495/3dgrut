@@ -29,6 +29,7 @@ struct RayPayload {
     tcnn::vec2 tMinMax;
     float hitT;
     float transmittance;
+    tcnn::vec3 normal;
     enum {
         Default = 0,
         Valid   = 1 << 0,
@@ -88,6 +89,7 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
     ray.idx           = x + params.resolution.x * y;
     ray.hitT          = 0.0f;
     ray.transmittance = 1.0f;
+    ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
 
     ray.origin    = sensorToWorldTransform * tcnn::vec4(sensorRayOriginPtr[ray.idx], 1.0f);
@@ -124,6 +126,7 @@ __device__ __inline__ RayPayloadT initializeRayPerPixel(const threedgut::RenderP
     ray.idx           = pixel.x + params.resolution.x * pixel.y;
     ray.hitT          = 0.0f;
     ray.transmittance = 1.0f;
+    ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
 
     ray.origin    = sensorToWorldTransform * tcnn::vec4(sensorRayOriginPtr[ray.idx], 1.0f);
@@ -149,6 +152,7 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
                                        const tcnn::vec3* __restrict__ sensorRayOriginPtr,
                                        float* __restrict__ worldCountPtr,
                                        float* __restrict__ worldHitDistancePtr,
+                                       tcnn::vec3* __restrict__ worldNormalPtr,
                                        tcnn::vec4* __restrict__ radianceDensityPtr,
                                        const tcnn::mat4x3& sensorToWorldTransform) {
     if (!ray.isValid()) {
@@ -158,6 +162,10 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
     radianceDensityPtr[ray.idx] = {ray.features[0], ray.features[1], ray.features[2], (1.0f - ray.transmittance)};
 
     worldHitDistancePtr[ray.idx] = ray.hitT;
+    if (worldNormalPtr != nullptr) {
+        const float alpha = 1.0f - ray.transmittance;
+        worldNormalPtr[ray.idx] = alpha > 1.0e-6f ? ray.normal / alpha : tcnn::vec3::zero();
+    }
 
 #if GAUSSIAN_ENABLE_HIT_COUNT
     worldCountPtr[ray.idx] = (float)ray.hitN;

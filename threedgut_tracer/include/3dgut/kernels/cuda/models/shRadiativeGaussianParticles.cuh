@@ -117,7 +117,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                            depth,
                                            &integratedDepth,
                                            normal != nullptr,
-                                           normal == nullptr ? make_float3(0, 0, 0) : *reinterpret_cast<const float3*>(&normal),
+                                           normal == nullptr ? make_float3(0, 0, 0) : *reinterpret_cast<const float3*>(normal),
                                            reinterpret_cast<float3*>(integratedNormal));
     }
 
@@ -349,7 +349,8 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                                   const TFeaturesVec* particleFeaturesPtr,
                                                   float& transmittance,
                                                   TFeaturesVec& features,
-                                                  float& hitT) const {
+                                                  float& hitT,
+                                                  tcnn::vec3* normal = nullptr) const {
         return threedgut::processHitFwd<ExtParams::KernelDegree, false, PerRayRadiance>(
             reinterpret_cast<const float3&>(rayOrigin),
             reinterpret_cast<const float3&>(rayDirection),
@@ -362,7 +363,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
             &transmittance,
             reinterpret_cast<float3*>(&features),
             &hitT,
-            nullptr);
+            reinterpret_cast<float3*>(normal));
     }
 
     template <bool PerRayRadiance>

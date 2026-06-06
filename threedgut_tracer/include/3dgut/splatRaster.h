@@ -16,6 +16,7 @@
 #pragma once
 
 #include <3dgut/renderer/gutRenderer.h>
+#include <3dgut/renderer/renderParameters.h>
 #include <3dgut/utils/logger.h>
 
 #include <json/json.hpp>
@@ -38,6 +39,7 @@ private:
     class CudaTimer;
 
     bool m_enableKernelTimings = false;
+    uint32_t m_depthMode = threedgut::RenderParameters::ExpectedDepth;
     std::map<std::string, float> m_timings;
 
     const size_t m_maxNumTimers = 256; // We only keep the most recent 256 timers
@@ -48,7 +50,7 @@ public:
 
     ~SplatRaster();
 
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
     trace(uint32_t frameNumber, int numActiveFeatures,
           // Particles
           torch::Tensor particleDensity,

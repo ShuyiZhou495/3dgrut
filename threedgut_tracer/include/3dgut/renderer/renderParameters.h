@@ -33,9 +33,15 @@ struct MemoryHandles {
 };
 
 struct RenderParameters {
+    enum DepthMode : uint32_t {
+        ExpectedDepth = 0,
+        GGGSMedianDepth = 1,
+    };
+
     uint32_t id;
     tcnn::ivec2 resolution;
     float hitTransmittance;
+    uint32_t depthMode = ExpectedDepth;
     threedgut::BoundingBox objectAABB;
     TSensorModel sensorModel;
     TSensorState sensorState;

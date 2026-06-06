@@ -23,6 +23,7 @@ struct HitParticle {
     int idx                            = -1;
     float hitT                         = InvalidHitT;
     float alpha                        = 0.0f;
+    tcnn::vec3 normal                  = tcnn::vec3::zero();
 };
 
 template <int K>
@@ -155,7 +156,9 @@ struct GUTKBufferRenderer : Params {
                 particles.densityIntegrateHit(hitParticle.alpha,
                                               ray.transmittance,
                                               hitParticle.hitT,
-                                              ray.hitT);
+                                              ray.hitT,
+                                              &hitParticle.normal,
+                                              &ray.normal);
 
             particles.featureIntegrateFwd(hitWeight,
                                           Params::PerRayParticleFeatures ? particles.featuresFromBuffer(hitParticle.idx, ray.direction) : tcnn::max(particleFeatures[hitParticle.idx], 0.f),
@@ -265,7 +268,8 @@ struct GUTKBufferRenderer : Params {
                                          ray.direction,
                                          particleData.densityParameters,
                                          hitParticle.alpha,
-                                         hitParticle.hitT) &&
+                                         hitParticle.hitT,
+                                         &hitParticle.normal) &&
                     (hitParticle.hitT > ray.tMinMax.x) &&
                     (hitParticle.hitT < ray.tMinMax.y)) {
 
@@ -351,6 +355,7 @@ struct GUTKBufferRenderer : Params {
 
             float hitAlpha           = 0.0f;
             float hitT               = 0.0f;
+            tcnn::vec3 hitNormal     = tcnn::vec3::zero();
             TFeaturesVec hitFeatures = TFeaturesVec::zero();
             bool validHit            = false;
 
@@ -366,7 +371,8 @@ struct GUTKBufferRenderer : Params {
                                              ray.direction,
                                              densityParams,
                                              hitAlpha,
-                                             hitT) &&
+                                             hitT,
+                                             &hitNormal) &&
                         (hitT > ray.tMinMax.x) &&
                         (hitT < ray.tMinMax.y)) {
 
@@ -418,6 +424,7 @@ struct GUTKBufferRenderer : Params {
             // Step 5: Warp reduction for feature accumulation
             TFeaturesVec accumulatedFeatures = TFeaturesVec::zero();
             float accumulatedHitT            = 0.0f;
+            tcnn::vec3 accumulatedNormal     = tcnn::vec3::zero();
             uint32_t accumulatedHitCount     = 0;
 
             // Only accumulate contributions before (and including) termination point
@@ -434,6 +441,7 @@ struct GUTKBufferRenderer : Params {
                     accumulatedFeatures[featIdx] = hitFeatures[featIdx] * hitWeight;
                 }
                 accumulatedHitT     = hitT * hitWeight;
+                accumulatedNormal   = hitNormal * hitWeight;
                 accumulatedHitCount = (hitWeight > 0.0f) ? 1 : 0;
             }
 
@@ -446,6 +454,9 @@ struct GUTKBufferRenderer : Params {
 
             for (uint32_t offset = WarpSize / 2; offset > 0; offset >>= 1) {
                 accumulatedHitT += __shfl_down_sync(WarpMask, accumulatedHitT, offset);
+                accumulatedNormal.x += __shfl_down_sync(WarpMask, accumulatedNormal.x, offset);
+                accumulatedNormal.y += __shfl_down_sync(WarpMask, accumulatedNormal.y, offset);
+                accumulatedNormal.z += __shfl_down_sync(WarpMask, accumulatedNormal.z, offset);
                 accumulatedHitCount += __shfl_down_sync(WarpMask, accumulatedHitCount, offset);
             }
 
@@ -455,6 +466,7 @@ struct GUTKBufferRenderer : Params {
                     ray.features[featIdx] += accumulatedFeatures[featIdx];
                 }
                 ray.hitT += accumulatedHitT;
+                ray.normal += accumulatedNormal;
                 ray.countHit(accumulatedHitCount);
             }
 
