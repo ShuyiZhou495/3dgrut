@@ -121,15 +121,6 @@ def sh_degree_to_num_features(degree):
     return sh_degree_to_specular_dim(degree) + 3
 
 
-def viridis_map(map: torch.Tensor, max_val: float) -> torch.Tensor:
-    """Viridis colormap for 1D maps, clamped to [0, max_val]. Returns (H,W,3)."""
-    import matplotlib
-    vs = (map / max_val).clip(0, 1).squeeze(-1).detach().cpu()
-    cmap = matplotlib.colormaps["viridis"]
-    rgb = torch.from_numpy(cmap(vs.numpy())[..., :3]).float()
-    return rgb
-
-
 def jet_map(map: torch.Tensor, max_val: float) -> torch.Tensor:
     """A colormap for 1D maps in [0.0, 1.0]"""
     vs = (map / max_val).clip(0, 1)
