@@ -93,7 +93,7 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
 
     ray.origin    = sensorToWorldTransform * tcnn::vec4(sensorRayOriginPtr[ray.idx], 1.0f);
-    ray.direction = tcnn::mat3(sensorToWorldTransform) * sensorRayDirectionPtr[ray.idx];
+    ray.direction = tcnn::normalize(tcnn::mat3(sensorToWorldTransform) * sensorRayDirectionPtr[ray.idx]);
 
     ray.tMinMax   = params.objectAABB.ray_intersect(ray.origin, ray.direction);
     ray.tMinMax.x = fmaxf(ray.tMinMax.x, 0.0f);
@@ -130,7 +130,7 @@ __device__ __inline__ RayPayloadT initializeRayPerPixel(const threedgut::RenderP
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
 
     ray.origin    = sensorToWorldTransform * tcnn::vec4(sensorRayOriginPtr[ray.idx], 1.0f);
-    ray.direction = tcnn::mat3(sensorToWorldTransform) * sensorRayDirectionPtr[ray.idx];
+    ray.direction = tcnn::normalize(tcnn::mat3(sensorToWorldTransform) * sensorRayDirectionPtr[ray.idx]);
 
     ray.tMinMax   = params.objectAABB.ray_intersect(ray.origin, ray.direction);
     ray.tMinMax.x = fmaxf(ray.tMinMax.x, 0.0f);

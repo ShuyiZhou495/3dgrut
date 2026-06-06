@@ -246,7 +246,7 @@ struct GUTKBufferRenderer : Params {
                 continue;
             }
 
-            const float supportRadius = 3.0f * rsqrtf(profile.A);
+            const float supportRadius = 8.0f * rsqrtf(profile.A);
             lo                        = fminf(lo, profile.tPeak - supportRadius);
             hi                        = fmaxf(hi, profile.tPeak + supportRadius);
             hasProfile                = true;
@@ -342,8 +342,11 @@ struct GUTKBufferRenderer : Params {
             return;
         }
         if (gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, hi) > LogHalf) {
-            ray.hitT = 0.0f;
-            return;
+            hi = ray.tMinMax.y;
+            if (gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, hi) > LogHalf) {
+                ray.hitT = 0.0f;
+                return;
+            }
         }
 
         for (int iter = 0; iter < 24; ++iter) {
