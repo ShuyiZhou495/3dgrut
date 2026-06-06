@@ -36,6 +36,7 @@ struct GGGSRayProfile {
     float A;
     float tPeak;
     float d2Min;
+    float responsePeak;
     float density;
     float alphaPeak;
 };
@@ -459,11 +460,12 @@ __device__ inline bool computeGGGSRayProfile(
         return false;
     }
 
-    profile.A         = A;
-    profile.tPeak     = tPeak;
-    profile.d2Min     = d2Min;
-    profile.density   = particle.density;
-    profile.alphaPeak = galpha;
+    profile.A            = A;
+    profile.tPeak        = tPeak;
+    profile.d2Min        = d2Min;
+    profile.responsePeak = gres;
+    profile.density      = particle.density;
+    profile.alphaPeak    = galpha;
     return true;
 }
 
@@ -473,7 +475,8 @@ __device__ inline float gggsRayProfileLogS(const GGGSRayProfile& profile, const 
     const float dt     = t - profile.tPeak;
     const float d2     = profile.d2Min + profile.A * dt * dt;
     const float gres   = particleResponse<ParticleKernelDegree>(d2);
-    const float G      = fminf(0.99f, gres * profile.density);
+    const float rel    = fminf(1.0f, gres / fmaxf(Eps, profile.responsePeak));
+    const float G      = profile.alphaPeak * rel;
     const float v      = sqrtf(fmaxf(Eps, 1.0f - G));
     const float vPeak  = sqrtf(fmaxf(Eps, 1.0f - profile.alphaPeak));
     const float logV   = logf(v);
@@ -487,11 +490,9 @@ __device__ inline float gggsRayProfileDLogSDt(const GGGSRayProfile& profile, con
     const float dt      = t - profile.tPeak;
     const float d2      = profile.d2Min + profile.A * dt * dt;
     const float gres    = particleResponse<ParticleKernelDegree>(d2);
-    const float G       = gres * profile.density;
-    if (G >= 0.99f) {
-        return 0.0f;
-    }
-    const float dGdD2    = profile.density * particleResponseGrd<ParticleKernelDegree>(d2, gres, 1.0f);
+    const float rel     = fminf(1.0f, gres / fmaxf(Eps, profile.responsePeak));
+    const float G       = profile.alphaPeak * rel;
+    const float dGdD2    = (rel >= 1.0f) ? 0.0f : (profile.alphaPeak / fmaxf(Eps, profile.responsePeak)) * particleResponseGrd<ParticleKernelDegree>(d2, gres, 1.0f);
     const float dD2Dt    = 2.0f * profile.A * dt;
     const float dLogVDt  = -0.5f * dGdD2 * dD2Dt / fmaxf(Eps, 1.0f - G);
     return t <= profile.tPeak ? dLogVDt : -dLogVDt;
