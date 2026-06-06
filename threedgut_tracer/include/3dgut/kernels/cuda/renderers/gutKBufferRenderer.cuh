@@ -231,7 +231,7 @@ struct GUTKBufferRenderer : Params {
 
         for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
             const uint32_t particleIdx = sortedTileParticleIdxPtr[sortedIndex];
-            if (particleIdx == GUTParameters::InvalidParticleIdx) {
+            if (particleIdx == threedgut::GUTParameters::InvalidParticleIdx) {
                 break;
             }
 
@@ -268,7 +268,7 @@ struct GUTKBufferRenderer : Params {
 
         for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
             const uint32_t particleIdx = sortedTileParticleIdxPtr[sortedIndex];
-            if (particleIdx == GUTParameters::InvalidParticleIdx) {
+            if (particleIdx == threedgut::GUTParameters::InvalidParticleIdx) {
                 break;
             }
 
