@@ -106,6 +106,28 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                   reinterpret_cast<float3*>(normal));
     }
 
+    __forceinline__ __device__ bool gggsDepthProfile(const tcnn::vec3& rayOrigin,
+                                                     const tcnn::vec3& rayDirection,
+                                                     const DensityParameters& parameters,
+                                                     float minHitDistance,
+                                                     float maxHitDistance,
+                                                     threedgut::GGGSRayProfile& profile) const {
+        return threedgut::computeGGGSRayProfile<ExtParams::KernelDegree>(
+            *reinterpret_cast<const float3*>(&rayOrigin),
+            *reinterpret_cast<const float3*>(&rayDirection),
+            reinterpret_cast<const threedgut::ParticeFetchedDensity&>(parameters),
+            ExtParams::MinParticleKernelDensity,
+            ExtParams::AlphaThreshold,
+            minHitDistance,
+            maxHitDistance,
+            profile);
+    }
+
+    __forceinline__ __device__ float gggsDepthProfileLogS(const threedgut::GGGSRayProfile& profile,
+                                                          float depth) const {
+        return threedgut::gggsRayProfileLogS<ExtParams::KernelDegree>(profile, depth);
+    }
+
     __forceinline__ __device__ float densityIntegrateHit(float alpha,
                                                          float& transmittance,
                                                          float depth,

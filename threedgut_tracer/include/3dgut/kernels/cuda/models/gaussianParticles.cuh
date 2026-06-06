@@ -32,6 +32,14 @@ struct ParticeFetchedDensity {
     float density;
 };
 
+struct GGGSRayProfile {
+    float A;
+    float tPeak;
+    float d2Min;
+    float density;
+    float alphaPeak;
+};
+
 __forceinline__ __device__ void quaternionWXYZToMatrix(const float4& q, float33& ret) {
     const float r = q.x;
     const float x = q.y;
@@ -415,6 +423,62 @@ __device__ inline bool processHitFwd(
     }
 
     return acceptHit;
+}
+
+template <int ParticleKernelDegree = 4>
+__device__ inline bool computeGGGSRayProfile(
+    const float3& rayOrigin,
+    const float3& rayDirection,
+    const ParticeFetchedDensity& particle,
+    const float minParticleKernelDensity,
+    const float minParticleAlpha,
+    const float minHitDistance,
+    const float maxHitDistance,
+    GGGSRayProfile& profile) {
+    const float3 giscl   = make_float3(1 / particle.scale.x, 1 / particle.scale.y, 1 / particle.scale.z);
+    const float3 gposc   = rayOrigin - particle.position;
+    const float3 gposcr  = gposc * particle.rotationT;
+    const float3 gro     = giscl * gposcr;
+    const float3 rayDirR = rayDirection * particle.rotationT;
+    const float3 grdu    = giscl * rayDirR;
+
+    const float A = dot(grdu, grdu);
+    if (A <= 1.0e-12f) {
+        return false;
+    }
+
+    const float B      = dot(gro, grdu);
+    const float C      = dot(gro, gro);
+    const float tPeak  = -B / A;
+    const float d2Min  = fmaxf(0.0f, C - B * B / A);
+    const float gres   = particleResponse<ParticleKernelDegree>(d2Min);
+    const float galpha = fminf(0.99f, gres * particle.density);
+
+    if ((tPeak <= minHitDistance) || (tPeak >= maxHitDistance) ||
+        (gres <= minParticleKernelDensity) || (galpha <= minParticleAlpha)) {
+        return false;
+    }
+
+    profile.A         = A;
+    profile.tPeak     = tPeak;
+    profile.d2Min     = d2Min;
+    profile.density   = particle.density;
+    profile.alphaPeak = galpha;
+    return true;
+}
+
+template <int ParticleKernelDegree = 4>
+__device__ inline float gggsRayProfileLogS(const GGGSRayProfile& profile, const float t) {
+    constexpr float Eps = 1.0e-6f;
+    const float dt     = t - profile.tPeak;
+    const float d2     = profile.d2Min + profile.A * dt * dt;
+    const float gres   = particleResponse<ParticleKernelDegree>(d2);
+    const float G      = fminf(0.99f, gres * profile.density);
+    const float v      = sqrtf(fmaxf(Eps, 1.0f - G));
+    const float vPeak  = sqrtf(fmaxf(Eps, 1.0f - profile.alphaPeak));
+    const float logV   = logf(v);
+    const float logVp  = logf(vPeak);
+    return t <= profile.tPeak ? logV : 2.0f * logVp - logV;
 }
 
 __device__ inline bool intersectCustomParticle(

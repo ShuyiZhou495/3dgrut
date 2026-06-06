@@ -50,6 +50,10 @@ __device__ __inline__ RayPayloadT initializeBackwardRay(const threedgut::RenderP
         ray.transmittanceGradient                                         = -1.f * featuresDensityGradient[RayPayloadT::FeatDim];
         ray.hitTBackward                                                  = worldHitDistancePtr[ray.idx];
         ray.hitTGradient                                                  = worldHitDistanceGradientPtr[ray.idx];
+        if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
+            // GGGs depth is a transmittance-root solve, not the expected-depth accumulator below.
+            ray.hitTGradient = 0.0f;
+        }
         ray.featuresBackward                                              = threedgut::sliceVec<0, RayPayloadT::FeatDim>(featuresDensity);
         ray.featuresGradient                                              = threedgut::sliceVec<0, RayPayloadT::FeatDim>(featuresDensityGradient);
     }
