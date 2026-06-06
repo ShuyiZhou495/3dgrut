@@ -265,12 +265,18 @@ struct GUTKBufferRenderer : Params {
                                                         Particles& particles,
                                                         const tcnn::uvec2& tileParticleRangeIndices,
                                                         const uint32_t* __restrict__ sortedTileParticleIdxPtr,
+                                                        const uint32_t lastContributor,
                                                         const float depth) {
         float logTransmittance = 0.0f;
+        uint32_t contributor = 0;
 
         for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
             const uint32_t particleIdx = sortedTileParticleIdxPtr[sortedIndex];
             if (particleIdx == threedgut::GUTParameters::InvalidParticleIdx) {
+                break;
+            }
+            contributor++;
+            if ((lastContributor > 0) && (contributor > lastContributor)) {
                 break;
             }
 
@@ -296,12 +302,18 @@ struct GUTKBufferRenderer : Params {
                                                                        Particles& particles,
                                                                        const tcnn::uvec2& tileParticleRangeIndices,
                                                                        const uint32_t* __restrict__ sortedTileParticleIdxPtr,
+                                                                       const uint32_t lastContributor,
                                                                        const float depth) {
         float derivative = 0.0f;
+        uint32_t contributor = 0;
 
         for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
             const uint32_t particleIdx = sortedTileParticleIdxPtr[sortedIndex];
             if (particleIdx == threedgut::GUTParameters::InvalidParticleIdx) {
+                break;
+            }
+            contributor++;
+            if ((lastContributor > 0) && (contributor > lastContributor)) {
                 break;
             }
 
@@ -320,6 +332,45 @@ struct GUTKBufferRenderer : Params {
         }
 
         return derivative;
+    }
+
+    template <typename TRay>
+    static inline __device__ uint32_t gggsReplayLastContributor(TRay& ray,
+                                                                Particles& particles,
+                                                                const tcnn::uvec2& tileParticleRangeIndices,
+                                                                const uint32_t* __restrict__ sortedTileParticleIdxPtr) {
+        float transmittance = 1.0f;
+        uint32_t contributor = 0;
+        uint32_t lastContributor = 0;
+
+        for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
+            const uint32_t particleIdx = sortedTileParticleIdxPtr[sortedIndex];
+            if (particleIdx == threedgut::GUTParameters::InvalidParticleIdx) {
+                break;
+            }
+            contributor++;
+
+            const auto densityParameters = particles.fetchDensityParameters(particleIdx);
+            float hitAlpha = 0.0f;
+            float hitT = 0.0f;
+            tcnn::vec3 hitNormal = tcnn::vec3::zero();
+            if (particles.densityHit(ray.origin,
+                                     ray.direction,
+                                     densityParameters,
+                                     hitAlpha,
+                                     hitT,
+                                     &hitNormal) &&
+                (hitT > ray.tMinMax.x) &&
+                (hitT < ray.tMinMax.y)) {
+                lastContributor = contributor;
+                transmittance *= (1.0f - hitAlpha);
+                if (transmittance < Particles::MinTransmittanceThreshold) {
+                    break;
+                }
+            }
+        }
+
+        return lastContributor;
     }
 
     template <typename TRay>
@@ -362,10 +413,10 @@ struct GUTKBufferRenderer : Params {
 #pragma unroll
             for (int i = 0; i <= Split; ++i) {
                 const float t = lo + static_cast<float>(i) * interval;
-                logT[i] = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, t);
+                logT[i] = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, t);
             }
 
-            if ((logT[0] < LogHalf) || (logT[Split] > LogHalf)) {
+            if ((iter == 0) && ((logT[0] < LogHalf) || (logT[Split] > LogHalf))) {
                 ray.gggsDebug.z = logT[0] < LogHalf ? 3.0f : 4.0f;
                 ray.hitT = 0.0f;
                 return;
@@ -381,9 +432,11 @@ struct GUTKBufferRenderer : Params {
             lo = lo + static_cast<float>(startId) * interval;
         }
 
-        const float logLo = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, lo);
-        const float logHi = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, hi);
-        const float wHi = fminf(fmaxf((logLo - LogHalf) / fmaxf(logLo - logHi, 1.0e-7f), 0.0f), 1.0f);
+        const float logLo = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, lo);
+        const float logHi = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, hi);
+        const float TLo = expf(logLo);
+        const float THi = expf(logHi);
+        const float wHi = fminf(fmaxf((TLo - 0.5f) / fmaxf(TLo - THi, 1.0e-7f), 0.0f), 1.0f);
         ray.hitT = wHi * hi + (1.0f - wHi) * lo;
         ray.gggsDebug.z = 0.0f;
         ray.gggsDebug.w = ray.hitT - ray.depthInitT;
@@ -404,6 +457,7 @@ struct GUTKBufferRenderer : Params {
         __shared__ PrefetchedParticleData prefetchedParticlesData[GUTParameters::Tiling::BlockSize];
 
         HitParticleKBuffer<Params::KHitBufferSize> hitParticleKBuffer;
+        uint32_t contributor = 0;
 
         for (uint32_t i = 0; i < tileNumBlocksToProcess; i++, tileNumParticlesToProcess -= GUTParameters::Tiling::BlockSize) {
 
@@ -433,6 +487,7 @@ struct GUTKBufferRenderer : Params {
                     i = tileNumBlocksToProcess;
                     break;
                 }
+                contributor++;
 
                 HitParticle hitParticle;
                 hitParticle.idx = particleData.idx;
@@ -451,6 +506,7 @@ struct GUTKBufferRenderer : Params {
                                            particles,
                                            particleFeaturesBuffer,
                                            particleFeaturesGradientBuffer);
+                        ray.gggsLastContributor = contributor;
                     }
                     hitParticleKBuffer.insert(hitParticle);
                 }
@@ -671,7 +727,7 @@ struct GUTKBufferRenderer : Params {
             return 0.0f;
         }
 
-        const float dLogTDt = gggsLogTransmittanceDepthDerivative(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.hitTBackward);
+        const float dLogTDt = gggsLogTransmittanceDepthDerivative(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, ray.hitTBackward);
         if (fabsf(dLogTDt) < 1.0e-7f) {
             return 0.0f;
         }
@@ -694,6 +750,9 @@ struct GUTKBufferRenderer : Params {
 
         using namespace threedgut;
         __shared__ PrefetchedRawParticleData prefetchedRawParticlesData[GUTParameters::Tiling::BlockSize];
+        if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
+            ray.gggsLastContributor = gggsReplayLastContributor(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr);
+        }
         const float gggsDepthGamma = gggsDepthBackwardGamma(params, ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr);
         const float expectedDepthGradient = params.depthMode == threedgut::RenderParameters::GGGSMedianDepth ? 0.0f : ray.hitTGradient;
 

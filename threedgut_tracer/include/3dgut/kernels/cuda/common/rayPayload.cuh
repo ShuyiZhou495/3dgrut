@@ -30,6 +30,7 @@ struct RayPayload {
     float hitT;
     float depthInitT;
     float transmittance;
+    uint32_t gggsLastContributor;
     tcnn::vec4 gggsDebug;
     tcnn::vec3 normal;
     enum {
@@ -92,6 +93,7 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
     ray.hitT          = 0.0f;
     ray.depthInitT    = 0.0f;
     ray.transmittance = 1.0f;
+    ray.gggsLastContributor = 0;
     ray.gggsDebug     = tcnn::vec4::zero();
     ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
@@ -131,6 +133,7 @@ __device__ __inline__ RayPayloadT initializeRayPerPixel(const threedgut::RenderP
     ray.hitT          = 0.0f;
     ray.depthInitT    = 0.0f;
     ray.transmittance = 1.0f;
+    ray.gggsLastContributor = 0;
     ray.gggsDebug     = tcnn::vec4::zero();
     ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
