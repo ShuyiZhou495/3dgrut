@@ -122,13 +122,11 @@ def sh_degree_to_num_features(degree):
 
 
 def viridis_map(map: torch.Tensor, max_val: float) -> torch.Tensor:
-    """Viridis colormap approximation for 1D maps, clamped to [0, max_val]."""
-    vs = (map / max_val).clip(0, 1).squeeze(-1)
+    """Viridis colormap for 1D maps, clamped to [0, max_val]. Returns (H,W,3)."""
     import matplotlib
+    vs = (map / max_val).clip(0, 1).squeeze(-1).detach().cpu()
     cmap = matplotlib.colormaps["viridis"]
-    rgb = torch.from_numpy(cmap(vs.cpu().numpy())[..., :3]).float()
-    if map.device.type != "cpu":
-        rgb = rgb.to(map.device)
+    rgb = torch.from_numpy(cmap(vs.numpy())[..., :3]).float()
     return rgb
 
 

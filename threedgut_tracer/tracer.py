@@ -220,6 +220,7 @@ class Tracer:
                 ray_radiance_density,
                 ray_hit_distance,
                 ray_hit_count,
+                ray_normal,
                 mog_visibility,
             )
 
@@ -229,6 +230,7 @@ class Tracer:
             ray_radiance_density_grd,
             ray_hit_distance_grd,
             ray_hit_count_grd_UNUSED,
+            ray_normal_grd_UNUSED,
             mog_visibility_grd_UNUSED,
         ):
             (
@@ -313,6 +315,7 @@ class Tracer:
                 pred_rgba,
                 pred_dist,
                 hits_count,
+                pred_normals_raw,
                 mog_visibility,
             ) = Tracer._Autograd.apply(
                 self.tracer_wrapper,
@@ -344,7 +347,7 @@ class Tracer:
             "pred_rgb": pred_rgb,
             "pred_opacity": pred_opacity,
             "pred_dist": pred_dist,
-            "pred_normals": torch.nn.functional.normalize(torch.ones_like(pred_rgb), dim=3),
+            "pred_normals": torch.nn.functional.normalize(pred_normals_raw.unsqueeze(0).contiguous(), dim=3),
             "hits_count": hits_count,
             "frame_time_ms": timings["forward_render"] if "forward_render" in timings else 0.0,
             "mog_visibility": mog_visibility,
