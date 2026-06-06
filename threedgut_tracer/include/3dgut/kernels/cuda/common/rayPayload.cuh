@@ -28,6 +28,7 @@ struct RayPayload {
     tcnn::vec3 direction;
     tcnn::vec2 tMinMax;
     float hitT;
+    float depthInitT;
     float transmittance;
     tcnn::vec3 normal;
     enum {
@@ -88,6 +89,7 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
     }
     ray.idx           = x + params.resolution.x * y;
     ray.hitT          = 0.0f;
+    ray.depthInitT    = 0.0f;
     ray.transmittance = 1.0f;
     ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
@@ -125,6 +127,7 @@ __device__ __inline__ RayPayloadT initializeRayPerPixel(const threedgut::RenderP
 
     ray.idx           = pixel.x + params.resolution.x * pixel.y;
     ray.hitT          = 0.0f;
+    ray.depthInitT    = 0.0f;
     ray.transmittance = 1.0f;
     ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();

@@ -152,6 +152,9 @@ struct GUTKBufferRenderer : Params {
             ray.transmittance *= (1.0 - hitParticle.alpha);
 
         } else {
+            if (ray.transmittance > 0.5f) {
+                ray.depthInitT = hitParticle.hitT;
+            }
             const float hitWeight =
                 particles.densityIntegrateHit(hitParticle.alpha,
                                               ray.transmittance,
@@ -330,34 +333,51 @@ struct GUTKBufferRenderer : Params {
             return;
         }
 
-        float lo, hi;
-        if (!gggsDepthRange(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, lo, hi)) {
+        constexpr float SampleRange = 0.4f;
+        constexpr float MinTransmittanceForDepth = 0.45f;
+        constexpr int Split = 8;
+        constexpr int SplitIterations = 5;
+        if (ray.transmittance > MinTransmittanceForDepth || ray.depthInitT <= ray.tMinMax.x) {
+            ray.hitT = 0.0f;
+            return;
+        }
+
+        float lo = fmaxf(ray.depthInitT - SampleRange, ray.tMinMax.x);
+        float hi = fminf(ray.depthInitT + SampleRange, ray.tMinMax.y);
+        if (hi <= lo) {
             ray.hitT = 0.0f;
             return;
         }
 
         constexpr float LogHalf = -0.6931471805599453f;
-        if (gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, lo) <= LogHalf) {
-            ray.hitT = lo;
-            return;
-        }
-        if (gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, hi) > LogHalf) {
-            hi = ray.tMinMax.y;
-            if (gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, hi) > LogHalf) {
+        float logT[Split + 1];
+        for (int iter = 0; iter < SplitIterations; ++iter) {
+            const float interval = (hi - lo) / static_cast<float>(Split);
+#pragma unroll
+            for (int i = 0; i <= Split; ++i) {
+                const float t = lo + static_cast<float>(i) * interval;
+                logT[i] = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, t);
+            }
+
+            if ((logT[0] < LogHalf) || (logT[Split] > LogHalf)) {
                 ray.hitT = 0.0f;
                 return;
             }
+
+            int startId = 0;
+#pragma unroll
+            for (int i = 1; i < Split; ++i) {
+                startId = logT[i] >= LogHalf ? i : startId;
+            }
+
+            hi = lo + static_cast<float>(startId + 1) * interval;
+            lo = lo + static_cast<float>(startId) * interval;
         }
 
-        for (int iter = 0; iter < 24; ++iter) {
-            const float mid = 0.5f * (lo + hi);
-            if (gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, mid) <= LogHalf) {
-                hi = mid;
-            } else {
-                lo = mid;
-            }
-        }
-        ray.hitT = hi;
+        const float logLo = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, lo);
+        const float logHi = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, hi);
+        const float wHi = fminf(fmaxf((logLo - LogHalf) / fmaxf(logLo - logHi, 1.0e-7f), 0.0f), 1.0f);
+        ray.hitT = wHi * hi + (1.0f - wHi) * lo;
     }
 
     template <typename TRay>
