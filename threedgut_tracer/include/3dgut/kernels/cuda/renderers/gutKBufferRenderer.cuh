@@ -290,11 +290,6 @@ struct GUTKBufferRenderer : Params {
         return true;
     }
 
-    static inline __device__ float gggsRenderPathStepTransmittance(const threedgut::GGGSRayProfile& profile,
-                                                                   const float depth) {
-        return depth > profile.tPeak ? (1.0f - profile.alphaPeak) : 1.0f;
-    }
-
     template <typename TRay>
     static inline __device__ float gggsTransmittance(TRay& ray,
                                                      const threedgut::RenderParameters& params,
@@ -326,7 +321,7 @@ struct GUTKBufferRenderer : Params {
                 continue;
             }
 
-            transmittance *= gggsRenderPathStepTransmittance(profile, depth);
+            transmittance *= particles.gggsDepthProfileTransmittance(profile, depth);
         }
 
         return transmittance;
@@ -426,10 +421,9 @@ struct GUTKBufferRenderer : Params {
         const float fallbackDepthInitT = ray.depthInitT;
         const uint32_t fallbackLastContributor = ray.gggsLastContributor;
         ray.depthInitT = 0.0f;
-        ray.gggsLastContributor = 0;
         float transmittance = 1.0f;
         float depthInitT = 0.0f;
-        uint32_t lastContributor = 0;
+        uint32_t depthInitContributor = 0;
         uint32_t contributor = 0;
 
         for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
@@ -438,6 +432,9 @@ struct GUTKBufferRenderer : Params {
                 break;
             }
             contributor++;
+            if ((fallbackLastContributor > 0) && (contributor > fallbackLastContributor)) {
+                break;
+            }
 
             const auto densityParameters = particles.fetchDensityParameters(particleIdx);
             threedgut::GGGSRayProfile profile;
@@ -447,23 +444,22 @@ struct GUTKBufferRenderer : Params {
 
             if (transmittance > 0.5f) {
                 depthInitT = profile.tPeak;
-                lastContributor = contributor;
+                depthInitContributor = contributor;
             }
             const float nextTransmittance = transmittance * (1.0f - profile.alphaPeak);
-            if ((transmittance > 0.5f) && (nextTransmittance <= 0.5f)) {
-                break;
-            }
             transmittance = nextTransmittance;
             if (transmittance < Particles::MinTransmittanceThreshold) {
                 break;
             }
         }
 
-        if (lastContributor > 0) {
+        if (depthInitContributor > 0) {
             ray.depthInitT = depthInitT;
-            ray.gggsLastContributor = lastContributor;
+            ray.gggsLastContributor = fallbackLastContributor > 0 ? fallbackLastContributor : depthInitContributor;
         } else if (fallbackDepthInitT > ray.tMinMax.x) {
             ray.depthInitT = fallbackDepthInitT;
+            ray.gggsLastContributor = fallbackLastContributor;
+        } else {
             ray.gggsLastContributor = fallbackLastContributor;
         }
     }
