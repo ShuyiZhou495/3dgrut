@@ -23,6 +23,7 @@ struct HitParticle {
     int idx                            = -1;
     float hitT                         = InvalidHitT;
     float alpha                        = 0.0f;
+    uint32_t contributor               = 0;
     tcnn::vec3 normal                  = tcnn::vec3::zero();
 };
 
@@ -498,6 +499,7 @@ struct GUTKBufferRenderer : Params {
 
                 HitParticle hitParticle;
                 hitParticle.idx = particleData.idx;
+                hitParticle.contributor = contributor;
                 if (particles.densityHit(ray.origin,
                                          ray.direction,
                                          particleData.densityParameters,
@@ -508,12 +510,13 @@ struct GUTKBufferRenderer : Params {
                     (hitParticle.hitT < ray.tMinMax.y)) {
 
                     if (hitParticleKBuffer.full()) {
+                        const HitParticle hitToProcess = hitParticleKBuffer.closestHit(hitParticle);
                         processHitParticle(ray,
-                                           hitParticleKBuffer.closestHit(hitParticle),
+                                           hitToProcess,
                                            particles,
                                            particleFeaturesBuffer,
                                            particleFeaturesGradientBuffer);
-                        ray.gggsLastContributor = contributor;
+                        ray.gggsLastContributor = ray.gggsLastContributor > hitToProcess.contributor ? ray.gggsLastContributor : hitToProcess.contributor;
                     }
                     hitParticleKBuffer.insert(hitParticle);
                 }
@@ -522,11 +525,13 @@ struct GUTKBufferRenderer : Params {
 
         if constexpr (Params::KHitBufferSize > 0) {
             for (int i = 0; ray.isAlive() && (i < hitParticleKBuffer.numHits()); ++i) {
+                const HitParticle hitToProcess = hitParticleKBuffer[Params::KHitBufferSize - hitParticleKBuffer.numHits() + i];
                 processHitParticle(ray,
-                                   hitParticleKBuffer[Params::KHitBufferSize - hitParticleKBuffer.numHits() + i],
+                                   hitToProcess,
                                    particles,
                                    particleFeaturesBuffer,
                                    particleFeaturesGradientBuffer);
+                ray.gggsLastContributor = ray.gggsLastContributor > hitToProcess.contributor ? ray.gggsLastContributor : hitToProcess.contributor;
             }
         }
 
