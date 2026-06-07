@@ -252,6 +252,46 @@ struct GUTKBufferRenderer : Params {
     }
 
     template <typename TRay>
+    static inline __device__ bool gggsRenderPathDepthProfile(const TRay& ray,
+                                                             Particles& particles,
+                                                             const DensityParameters& densityParameters,
+                                                             threedgut::GGGSRayProfile& profile) {
+        float rgbAlpha = 0.0f;
+        float rgbHitT = 0.0f;
+        if (!particles.densityHit(ray.origin,
+                                  ray.direction,
+                                  densityParameters,
+                                  rgbAlpha,
+                                  rgbHitT,
+                                  nullptr)) {
+            return false;
+        }
+
+        if ((rgbAlpha < Params::AlphaThreshold) ||
+            (rgbHitT <= ray.tMinMax.x) ||
+            (rgbHitT >= ray.tMinMax.y)) {
+            return false;
+        }
+
+        if (!particles.gggsDepthProfileForInit(ray.origin,
+                                               ray.direction,
+                                               densityParameters,
+                                               ray.tMinMax.x,
+                                               ray.tMinMax.y,
+                                               profile)) {
+            return false;
+        }
+
+        if ((profile.tPeak <= ray.tMinMax.x) ||
+            (profile.tPeak >= ray.tMinMax.y)) {
+            return false;
+        }
+
+        profile.alphaPeak = fminf(0.99f, fmaxf(0.0f, rgbAlpha));
+        return true;
+    }
+
+    template <typename TRay>
     static inline __device__ float gggsTransmittance(TRay& ray,
                                                      const threedgut::RenderParameters& params,
                                                      Particles& particles,
@@ -261,6 +301,9 @@ struct GUTKBufferRenderer : Params {
                                                      const tcnn::vec4* __restrict__ particlesProjectedConicOpacityPtr,
                                                      const uint32_t lastContributor,
                                                      const float depth) {
+        (void)params;
+        (void)particlesProjectedPositionPtr;
+        (void)particlesProjectedConicOpacityPtr;
         float transmittance = 1.0f;
         uint32_t contributor = 0;
 
@@ -273,19 +316,9 @@ struct GUTKBufferRenderer : Params {
             if ((lastContributor > 0) && (contributor > lastContributor)) {
                 break;
             }
-            if (!gggsPixelCandidate(params, ray, particleIdx, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr)) {
-                continue;
-            }
-
             const auto densityParameters = particles.fetchDensityParameters(particleIdx);
             threedgut::GGGSRayProfile profile;
-            if (!particles.gggsDepthProfile(ray.origin,
-                                            ray.direction,
-                                            densityParameters,
-                                            ray.tMinMax.x,
-                                            ray.tMinMax.y,
-                                            false,
-                                            profile)) {
+            if (!gggsRenderPathDepthProfile(ray, particles, densityParameters, profile)) {
                 continue;
             }
 
@@ -305,6 +338,9 @@ struct GUTKBufferRenderer : Params {
                                                                        const tcnn::vec4* __restrict__ particlesProjectedConicOpacityPtr,
                                                                        const uint32_t lastContributor,
                                                                        const float depth) {
+        (void)params;
+        (void)particlesProjectedPositionPtr;
+        (void)particlesProjectedConicOpacityPtr;
         float derivative = 0.0f;
         uint32_t contributor = 0;
 
@@ -317,19 +353,9 @@ struct GUTKBufferRenderer : Params {
             if ((lastContributor > 0) && (contributor > lastContributor)) {
                 break;
             }
-            if (!gggsPixelCandidate(params, ray, particleIdx, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr)) {
-                continue;
-            }
-
             const auto densityParameters = particles.fetchDensityParameters(particleIdx);
             threedgut::GGGSRayProfile profile;
-            if (!particles.gggsDepthProfile(ray.origin,
-                                            ray.direction,
-                                            densityParameters,
-                                            ray.tMinMax.x,
-                                            ray.tMinMax.y,
-                                            false,
-                                            profile)) {
+            if (!gggsRenderPathDepthProfile(ray, particles, densityParameters, profile)) {
                 continue;
             }
 
@@ -349,6 +375,9 @@ struct GUTKBufferRenderer : Params {
                                                                                const tcnn::vec4* __restrict__ particlesProjectedConicOpacityPtr,
                                                                                const uint32_t lastContributor,
                                                                                const float depth) {
+        (void)params;
+        (void)particlesProjectedPositionPtr;
+        (void)particlesProjectedConicOpacityPtr;
         float dominantMagnitude = 0.0f;
         float dominantId = -1.0f;
         uint32_t contributor = 0;
@@ -362,19 +391,9 @@ struct GUTKBufferRenderer : Params {
             if ((lastContributor > 0) && (contributor > lastContributor)) {
                 break;
             }
-            if (!gggsPixelCandidate(params, ray, particleIdx, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr)) {
-                continue;
-            }
-
             const auto densityParameters = particles.fetchDensityParameters(particleIdx);
             threedgut::GGGSRayProfile profile;
-            if (!particles.gggsDepthProfile(ray.origin,
-                                            ray.direction,
-                                            densityParameters,
-                                            ray.tMinMax.x,
-                                            ray.tMinMax.y,
-                                            false,
-                                            profile)) {
+            if (!gggsRenderPathDepthProfile(ray, particles, densityParameters, profile)) {
                 continue;
             }
 
@@ -417,32 +436,8 @@ struct GUTKBufferRenderer : Params {
             contributor++;
 
             const auto densityParameters = particles.fetchDensityParameters(particleIdx);
-            float rgbAlpha = 0.0f;
-            float rgbHitT = 0.0f;
-            if (!particles.densityHit(ray.origin,
-                                      ray.direction,
-                                      densityParameters,
-                                      rgbAlpha,
-                                      rgbHitT,
-                                      nullptr)) {
-                continue;
-            }
-
             threedgut::GGGSRayProfile profile;
-            if (!particles.gggsDepthProfileForInit(ray.origin,
-                                                   ray.direction,
-                                                   densityParameters,
-                                                   ray.tMinMax.x,
-                                                   ray.tMinMax.y,
-                                                   profile)) {
-                continue;
-            }
-
-            if ((rgbAlpha < Params::AlphaThreshold) ||
-                (rgbHitT <= ray.tMinMax.x) ||
-                (rgbHitT >= ray.tMinMax.y) ||
-                (profile.tPeak <= ray.tMinMax.x) ||
-                (profile.tPeak >= ray.tMinMax.y)) {
+            if (!gggsRenderPathDepthProfile(ray, particles, densityParameters, profile)) {
                 continue;
             }
 
@@ -450,7 +445,7 @@ struct GUTKBufferRenderer : Params {
                 depthInitT = profile.tPeak;
                 lastContributor = contributor;
             }
-            const float nextTransmittance = transmittance * (1.0f - rgbAlpha);
+            const float nextTransmittance = transmittance * (1.0f - profile.alphaPeak);
             if ((transmittance > 0.5f) && (nextTransmittance <= 0.5f)) {
                 break;
             }
