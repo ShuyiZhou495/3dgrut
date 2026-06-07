@@ -80,6 +80,7 @@ struct TGUTRendererParams {
     static constexpr bool PerRayParticleFeatures = TGUTProjectorParams::PerRayParticleFeatures;
     static constexpr int KHitBufferSize          = GAUSSIAN_K_BUFFER_SIZE;
     static constexpr bool CustomBackward         = false;
+    static constexpr float AlphaThreshold        = model_::Particles::AlphaThreshold;
 };
 
 #include <3dgut/kernels/cuda/renderers/gutKBufferRenderer.cuh>
