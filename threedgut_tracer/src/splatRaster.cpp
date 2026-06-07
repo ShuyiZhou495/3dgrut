@@ -173,7 +173,7 @@ SplatRaster::SplatRaster(const nlohmann::json& config)
 SplatRaster::~SplatRaster(void) {
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
                    torch::Tensor particleDensity,
                    torch::Tensor particleRadiance,
@@ -202,6 +202,7 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
     torch::Tensor rayNormal          = torch::zeros({height, width, 3}, opts);
     torch::Tensor rayGGGSDebug       = torch::zeros({height, width, 4}, opts);
     torch::Tensor rayGGGSTransmittanceDebug = torch::zeros({height, width, 4}, opts);
+    torch::Tensor rayGGGSSearchDebug = torch::zeros({height, width, 4}, opts);
     torch::Tensor particleVisibility = torch::zeros({numParticles, 1}, opts);
 
     m_parameters.values.numParticles               = numParticles;
@@ -238,6 +239,7 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
         reinterpret_cast<tcnn::vec3*>(voidDataPtr(rayNormal)),
         reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayGGGSDebug)),
         reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayGGGSTransmittanceDebug)),
+        reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayGGGSSearchDebug)),
         reinterpret_cast<tcnn::vec4*>(voidDataPtr(rayRadianceDensity)),
         reinterpret_cast<int*>(voidDataPtr(particleVisibility)),
         m_parameters,
@@ -250,8 +252,8 @@ SplatRaster::trace(uint32_t frameNumber, int numActiveFeatures,
         timer->stop();
     }
 
-    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(
-        rayRadianceDensity, rayHitDistance, rayHitCount, rayNormal, rayGGGSDebug, rayGGGSTransmittanceDebug, particleVisibility);
+    return std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>(
+        rayRadianceDensity, rayHitDistance, rayHitCount, rayNormal, rayGGGSDebug, rayGGGSTransmittanceDebug, rayGGGSSearchDebug, particleVisibility);
 }
 
 std::tuple<torch::Tensor, torch::Tensor>

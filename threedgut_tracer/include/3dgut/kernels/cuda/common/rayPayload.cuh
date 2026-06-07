@@ -33,6 +33,7 @@ struct RayPayload {
     uint32_t gggsLastContributor;
     tcnn::vec4 gggsDebug;
     tcnn::vec4 gggsTransmittanceDebug;
+    tcnn::vec4 gggsSearchDebug;
     tcnn::vec3 normal;
     enum {
         Default = 0,
@@ -97,6 +98,7 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
     ray.gggsLastContributor = 0;
     ray.gggsDebug     = tcnn::vec4::zero();
     ray.gggsTransmittanceDebug = tcnn::vec4::zero();
+    ray.gggsSearchDebug = tcnn::vec4::zero();
     ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
 
@@ -138,6 +140,7 @@ __device__ __inline__ RayPayloadT initializeRayPerPixel(const threedgut::RenderP
     ray.gggsLastContributor = 0;
     ray.gggsDebug     = tcnn::vec4::zero();
     ray.gggsTransmittanceDebug = tcnn::vec4::zero();
+    ray.gggsSearchDebug = tcnn::vec4::zero();
     ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
 
@@ -167,6 +170,7 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
                                        tcnn::vec3* __restrict__ worldNormalPtr,
                                        tcnn::vec4* __restrict__ worldGGGSDebugPtr,
                                        tcnn::vec4* __restrict__ worldGGGSTransmittanceDebugPtr,
+                                       tcnn::vec4* __restrict__ worldGGGSSearchDebugPtr,
                                        tcnn::vec4* __restrict__ radianceDensityPtr,
                                        const tcnn::mat4x3& sensorToWorldTransform) {
     if (!ray.isValid()) {
@@ -181,6 +185,9 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
     }
     if (worldGGGSTransmittanceDebugPtr != nullptr) {
         worldGGGSTransmittanceDebugPtr[ray.idx] = ray.gggsTransmittanceDebug;
+    }
+    if (worldGGGSSearchDebugPtr != nullptr) {
+        worldGGGSSearchDebugPtr[ray.idx] = ray.gggsSearchDebug;
     }
     if (worldNormalPtr != nullptr) {
         const float alpha = 1.0f - ray.transmittance;

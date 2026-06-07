@@ -340,6 +340,55 @@ struct GUTKBufferRenderer : Params {
     }
 
     template <typename TRay>
+    static inline __device__ tcnn::vec2 gggsDominantDepthDerivativeContributor(TRay& ray,
+                                                                               const threedgut::RenderParameters& params,
+                                                                               Particles& particles,
+                                                                               const tcnn::uvec2& tileParticleRangeIndices,
+                                                                               const uint32_t* __restrict__ sortedTileParticleIdxPtr,
+                                                                               const tcnn::vec2* __restrict__ particlesProjectedPositionPtr,
+                                                                               const tcnn::vec4* __restrict__ particlesProjectedConicOpacityPtr,
+                                                                               const uint32_t lastContributor,
+                                                                               const float depth) {
+        float dominantMagnitude = 0.0f;
+        float dominantId = -1.0f;
+        uint32_t contributor = 0;
+
+        for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
+            const uint32_t particleIdx = sortedTileParticleIdxPtr[sortedIndex];
+            if (particleIdx == threedgut::GUTParameters::InvalidParticleIdx) {
+                break;
+            }
+            contributor++;
+            if ((lastContributor > 0) && (contributor > lastContributor)) {
+                break;
+            }
+            if (!gggsPixelCandidate(params, ray, particleIdx, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr)) {
+                continue;
+            }
+
+            const auto densityParameters = particles.fetchDensityParameters(particleIdx);
+            threedgut::GGGSRayProfile profile;
+            if (!particles.gggsDepthProfile(ray.origin,
+                                            ray.direction,
+                                            densityParameters,
+                                            ray.tMinMax.x,
+                                            ray.tMinMax.y,
+                                            false,
+                                            profile)) {
+                continue;
+            }
+
+            const float magnitude = fabsf(particles.gggsDepthProfileDLogSDt(profile, depth));
+            if (magnitude > dominantMagnitude) {
+                dominantMagnitude = magnitude;
+                dominantId = static_cast<float>(particleIdx);
+            }
+        }
+
+        return {dominantMagnitude, dominantId};
+    }
+
+    template <typename TRay>
     static inline __device__ void initializeGGGSMedianDepth(TRay& ray,
                                                             const threedgut::RenderParameters& params,
                                                             Particles& particles,
@@ -437,6 +486,7 @@ struct GUTKBufferRenderer : Params {
         constexpr int MaxBracketExpansions = 5;
         constexpr int Split = 8;
         constexpr int SplitIterations = 5;
+        constexpr float MonoTolerance = 1.0e-4f;
         const uint32_t searchLastContributor = ray.gggsLastContributor;
         const float finalTransmittance = gggsTransmittance(ray,
                                                            params,
@@ -448,6 +498,7 @@ struct GUTKBufferRenderer : Params {
                                                            searchLastContributor,
                                                            ray.tMinMax.y);
         ray.gggsDebug = {ray.depthInitT, finalTransmittance, 0.0f, 0.0f};
+        ray.gggsSearchDebug = {0.0f, 0.0f, 0.0f, -1.0f};
         if (ray.depthInitT <= ray.tMinMax.x) {
             ray.gggsDebug.z = 1.0f;
             return;
@@ -467,6 +518,9 @@ struct GUTKBufferRenderer : Params {
             gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, debugMid),
             gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, debugHi),
             static_cast<float>(ray.gggsLastContributor)};
+        bool monoBad = (ray.gggsTransmittanceDebug.y > ray.gggsTransmittanceDebug.x + MonoTolerance) ||
+                       (ray.gggsTransmittanceDebug.z > ray.gggsTransmittanceDebug.y + MonoTolerance);
+        ray.gggsSearchDebug.y = monoBad ? 1.0f : 0.0f;
         if (finalTransmittance > MinTransmittanceForDepth) {
             ray.gggsDebug.z = 2.0f;
             return;
@@ -476,6 +530,7 @@ struct GUTKBufferRenderer : Params {
         float bracketTHi = ray.gggsTransmittanceDebug.z;
         float sampleRange = SampleRange;
         bool bracketed = (bracketTLo >= 0.5f) && (bracketTHi <= 0.5f);
+        ray.gggsSearchDebug.x = bracketed ? 1.0f : 0.0f;
         for (int expand = 0; !bracketed && (expand < MaxBracketExpansions); ++expand) {
             if ((lo <= ray.tMinMax.x) && (hi >= ray.tMinMax.y)) {
                 break;
@@ -485,8 +540,11 @@ struct GUTKBufferRenderer : Params {
             hi = fminf(ray.depthInitT + sampleRange, ray.tMinMax.y);
             bracketTLo = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, lo);
             bracketTHi = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, hi);
+            monoBad = monoBad || (bracketTHi > bracketTLo + MonoTolerance);
             bracketed = (bracketTLo >= 0.5f) && (bracketTHi <= 0.5f);
         }
+        ray.gggsSearchDebug.x = bracketed ? 1.0f : 0.0f;
+        ray.gggsSearchDebug.y = monoBad ? 1.0f : 0.0f;
 
         if (!bracketed) {
             ray.gggsDebug.z = bracketTLo < 0.5f ? 3.0f : 4.0f;
@@ -500,6 +558,9 @@ struct GUTKBufferRenderer : Params {
             for (int i = 0; i <= Split; ++i) {
                 const float t = lo + static_cast<float>(i) * interval;
                 T[i] = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, t);
+                if ((i > 0) && (T[i] > T[i - 1] + MonoTolerance)) {
+                    monoBad = true;
+                }
             }
 
             int startId = 0;
@@ -514,10 +575,14 @@ struct GUTKBufferRenderer : Params {
 
         const float TLo = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, lo);
         const float THi = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, hi);
+        monoBad = monoBad || (THi > TLo + MonoTolerance);
         const float wHi = fminf(fmaxf((TLo - 0.5f) / fmaxf(TLo - THi, 1.0e-7f), 0.0f), 1.0f);
         ray.hitT = wHi * hi + (1.0f - wHi) * lo;
+        const float dLogTDt = gggsLogTransmittanceDepthDerivative(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, ray.hitT);
+        const tcnn::vec2 dominant = gggsDominantDepthDerivativeContributor(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, ray.hitT);
         ray.gggsDebug.z = 0.0f;
         ray.gggsDebug.w = ray.hitT - ray.depthInitT;
+        ray.gggsSearchDebug = {1.0f, monoBad ? 1.0f : 0.0f, -dLogTDt, dominant.y};
     }
 
     template <typename TRay>
