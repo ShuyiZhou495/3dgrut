@@ -32,6 +32,7 @@ struct RayPayload {
     float transmittance;
     uint32_t gggsLastContributor;
     tcnn::vec4 gggsDebug;
+    tcnn::vec4 gggsTransmittanceDebug;
     tcnn::vec3 normal;
     enum {
         Default = 0,
@@ -95,6 +96,7 @@ __device__ __inline__ RayPayloadT initializeRay(const threedgut::RenderParameter
     ray.transmittance = 1.0f;
     ray.gggsLastContributor = 0;
     ray.gggsDebug     = tcnn::vec4::zero();
+    ray.gggsTransmittanceDebug = tcnn::vec4::zero();
     ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
 
@@ -135,6 +137,7 @@ __device__ __inline__ RayPayloadT initializeRayPerPixel(const threedgut::RenderP
     ray.transmittance = 1.0f;
     ray.gggsLastContributor = 0;
     ray.gggsDebug     = tcnn::vec4::zero();
+    ray.gggsTransmittanceDebug = tcnn::vec4::zero();
     ray.normal        = tcnn::vec3::zero();
     ray.features      = tcnn::vec<RayPayloadT::FeatDim>::zero();
 
@@ -163,6 +166,7 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
                                        float* __restrict__ worldHitDistancePtr,
                                        tcnn::vec3* __restrict__ worldNormalPtr,
                                        tcnn::vec4* __restrict__ worldGGGSDebugPtr,
+                                       tcnn::vec4* __restrict__ worldGGGSTransmittanceDebugPtr,
                                        tcnn::vec4* __restrict__ radianceDensityPtr,
                                        const tcnn::mat4x3& sensorToWorldTransform) {
     if (!ray.isValid()) {
@@ -174,6 +178,9 @@ __device__ __inline__ void finalizeRay(const TRayPayload& ray,
     worldHitDistancePtr[ray.idx] = ray.hitT;
     if (worldGGGSDebugPtr != nullptr) {
         worldGGGSDebugPtr[ray.idx] = ray.gggsDebug;
+    }
+    if (worldGGGSTransmittanceDebugPtr != nullptr) {
+        worldGGGSTransmittanceDebugPtr[ray.idx] = ray.gggsTransmittanceDebug;
     }
     if (worldNormalPtr != nullptr) {
         const float alpha = 1.0f - ray.transmittance;

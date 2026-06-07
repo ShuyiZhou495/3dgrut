@@ -69,6 +69,7 @@ public:
                          float* worldHitDistanceCudaPtr,
                          tcnn::vec3* worldNormalCudaPtr,
                          tcnn::vec4* worldGGGSDebugCudaPtr,
+                         tcnn::vec4* worldGGGSTransmittanceDebugCudaPtr,
                          tcnn::vec4* radianceDensityCudaPtr,
                          int* particlesVisibilityCudaPtr,
                          Parameters& parameters,

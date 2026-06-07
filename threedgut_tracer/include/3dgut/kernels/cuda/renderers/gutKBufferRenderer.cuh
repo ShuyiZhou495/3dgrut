@@ -392,12 +392,6 @@ struct GUTKBufferRenderer : Params {
             ray.hitT = 0.0f;
             return;
         }
-        if (ray.transmittance > MinTransmittanceForDepth) {
-            ray.gggsDebug.z = 2.0f;
-            ray.hitT = 0.0f;
-            return;
-        }
-
         float lo = fmaxf(ray.depthInitT - SampleRange, ray.tMinMax.x);
         float hi = fminf(ray.depthInitT + SampleRange, ray.tMinMax.y);
         if (hi <= lo) {
@@ -407,6 +401,19 @@ struct GUTKBufferRenderer : Params {
         }
 
         constexpr float LogHalf = -0.6931471805599453f;
+        const float debugLo = lo;
+        const float debugMid = ray.depthInitT;
+        const float debugHi = hi;
+        ray.gggsTransmittanceDebug = {
+            expf(gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, debugLo)),
+            expf(gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, debugMid)),
+            expf(gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, debugHi)),
+            static_cast<float>(ray.gggsLastContributor)};
+        if (ray.transmittance > MinTransmittanceForDepth) {
+            ray.gggsDebug.z = 2.0f;
+            ray.hitT = 0.0f;
+            return;
+        }
         float logT[Split + 1];
         for (int iter = 0; iter < SplitIterations; ++iter) {
             const float interval = (hi - lo) / static_cast<float>(Split);
