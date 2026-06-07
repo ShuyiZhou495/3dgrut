@@ -435,6 +435,7 @@ __device__ inline bool computeGGGSRayProfile(
     const float minParticleAlpha,
     const float minHitDistance,
     const float maxHitDistance,
+    const bool rejectOutOfBounds,
     GGGSRayProfile& profile) {
     const float3 giscl   = make_float3(1 / particle.scale.x, 1 / particle.scale.y, 1 / particle.scale.z);
     const float3 gposc   = rayOrigin - particle.position;
@@ -455,7 +456,7 @@ __device__ inline bool computeGGGSRayProfile(
     const float gres   = particleResponse<ParticleKernelDegree>(d2Min);
     const float galpha = fminf(0.99f, gres * particle.density);
 
-    if ((tPeak <= minHitDistance) || (tPeak >= maxHitDistance) ||
+    if ((rejectOutOfBounds && ((tPeak <= minHitDistance) || (tPeak >= maxHitDistance))) ||
         (gres <= minParticleKernelDensity) || (galpha <= minParticleAlpha)) {
         return false;
     }
@@ -482,6 +483,19 @@ __device__ inline float gggsRayProfileLogS(const GGGSRayProfile& profile, const 
     const float logV   = logf(v);
     const float logVp  = logf(vPeak);
     return t <= profile.tPeak ? logV : 2.0f * logVp - logV;
+}
+
+template <int ParticleKernelDegree = 4>
+__device__ inline float gggsRayProfileTransmittance(const GGGSRayProfile& profile, const float t) {
+    constexpr float Eps = 1.0e-6f;
+    const float dt     = t - profile.tPeak;
+    const float d2     = profile.d2Min + profile.A * dt * dt;
+    const float gres   = particleResponse<ParticleKernelDegree>(d2);
+    const float rel    = fminf(1.0f, gres / fmaxf(Eps, profile.responsePeak));
+    const float G      = profile.alphaPeak * rel;
+    const float oneMinusGaussian = fmaxf(Eps, 1.0f - G);
+    const float rvacancy = rsqrtf(oneMinusGaussian);
+    return (t > profile.tPeak ? (1.0f - profile.alphaPeak) : oneMinusGaussian) * rvacancy;
 }
 
 template <int ParticleKernelDegree = 4>

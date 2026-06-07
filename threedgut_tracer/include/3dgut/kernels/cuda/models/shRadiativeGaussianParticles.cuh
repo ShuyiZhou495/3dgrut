@@ -111,6 +111,7 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
                                                      const DensityParameters& parameters,
                                                      float minHitDistance,
                                                      float maxHitDistance,
+                                                     bool rejectOutOfBounds,
                                                      threedgut::GGGSRayProfile& profile) const {
         return threedgut::computeGGGSRayProfile<ExtParams::KernelDegree>(
             *reinterpret_cast<const float3*>(&rayOrigin),
@@ -120,12 +121,18 @@ struct ShRadiativeGaussianVolumetricFeaturesParticles : Params, public ExtParams
             ExtParams::AlphaThreshold,
             minHitDistance,
             maxHitDistance,
+            rejectOutOfBounds,
             profile);
     }
 
     __forceinline__ __device__ float gggsDepthProfileLogS(const threedgut::GGGSRayProfile& profile,
                                                           float depth) const {
         return threedgut::gggsRayProfileLogS<ExtParams::KernelDegree>(profile, depth);
+    }
+
+    __forceinline__ __device__ float gggsDepthProfileTransmittance(const threedgut::GGGSRayProfile& profile,
+                                                                   float depth) const {
+        return threedgut::gggsRayProfileTransmittance<ExtParams::KernelDegree>(profile, depth);
     }
 
     __forceinline__ __device__ float gggsDepthProfileDLogSDt(const threedgut::GGGSRayProfile& profile,

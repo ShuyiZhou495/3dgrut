@@ -223,52 +223,13 @@ struct GUTKBufferRenderer : Params {
     }
 
     template <typename TRay>
-    static inline __device__ bool gggsDepthRange(TRay& ray,
-                                                 Particles& particles,
-                                                 const tcnn::uvec2& tileParticleRangeIndices,
-                                                 const uint32_t* __restrict__ sortedTileParticleIdxPtr,
-                                                 float& lo,
-                                                 float& hi) {
-        bool hasProfile = false;
-        lo              = ray.tMinMax.y;
-        hi              = ray.tMinMax.x;
-
-        for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
-            const uint32_t particleIdx = sortedTileParticleIdxPtr[sortedIndex];
-            if (particleIdx == threedgut::GUTParameters::InvalidParticleIdx) {
-                break;
-            }
-
-            const auto densityParameters = particles.fetchDensityParameters(particleIdx);
-            threedgut::GGGSRayProfile profile;
-            if (!particles.gggsDepthProfile(ray.origin,
-                                            ray.direction,
-                                            densityParameters,
-                                            ray.tMinMax.x,
-                                            ray.tMinMax.y,
-                                            profile)) {
-                continue;
-            }
-
-            const float supportRadius = 8.0f * rsqrtf(profile.A);
-            lo                        = fminf(lo, profile.tPeak - supportRadius);
-            hi                        = fmaxf(hi, profile.tPeak + supportRadius);
-            hasProfile                = true;
-        }
-
-        lo = fmaxf(lo, ray.tMinMax.x);
-        hi = fminf(hi, ray.tMinMax.y);
-        return hasProfile && (hi > lo);
-    }
-
-    template <typename TRay>
-    static inline __device__ float gggsLogTransmittance(TRay& ray,
-                                                        Particles& particles,
-                                                        const tcnn::uvec2& tileParticleRangeIndices,
-                                                        const uint32_t* __restrict__ sortedTileParticleIdxPtr,
-                                                        const uint32_t lastContributor,
-                                                        const float depth) {
-        float logTransmittance = 0.0f;
+    static inline __device__ float gggsTransmittance(TRay& ray,
+                                                     Particles& particles,
+                                                     const tcnn::uvec2& tileParticleRangeIndices,
+                                                     const uint32_t* __restrict__ sortedTileParticleIdxPtr,
+                                                     const uint32_t lastContributor,
+                                                     const float depth) {
+        float transmittance = 1.0f;
         uint32_t contributor = 0;
 
         for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
@@ -288,14 +249,15 @@ struct GUTKBufferRenderer : Params {
                                             densityParameters,
                                             ray.tMinMax.x,
                                             ray.tMinMax.y,
+                                            false,
                                             profile)) {
                 continue;
             }
 
-            logTransmittance += particles.gggsDepthProfileLogS(profile, depth);
+            transmittance *= particles.gggsDepthProfileTransmittance(profile, depth);
         }
 
-        return logTransmittance;
+        return transmittance;
     }
 
     template <typename TRay>
@@ -325,6 +287,7 @@ struct GUTKBufferRenderer : Params {
                                             densityParameters,
                                             ray.tMinMax.x,
                                             ray.tMinMax.y,
+                                            false,
                                             profile)) {
                 continue;
             }
@@ -390,60 +353,53 @@ struct GUTKBufferRenderer : Params {
         ray.gggsDebug = {ray.depthInitT, ray.transmittance, 0.0f, 0.0f};
         if (ray.depthInitT <= ray.tMinMax.x) {
             ray.gggsDebug.z = 1.0f;
-            ray.hitT = 0.0f;
             return;
         }
         float lo = fmaxf(ray.depthInitT - SampleRange, ray.tMinMax.x);
         float hi = fminf(ray.depthInitT + SampleRange, ray.tMinMax.y);
         if (hi <= lo) {
             ray.gggsDebug.z = 1.0f;
-            ray.hitT = 0.0f;
             return;
         }
 
-        constexpr float LogHalf = -0.6931471805599453f;
         const float debugLo = lo;
         const float debugMid = ray.depthInitT;
         const float debugHi = hi;
         ray.gggsTransmittanceDebug = {
-            expf(gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, debugLo)),
-            expf(gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, debugMid)),
-            expf(gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, debugHi)),
+            gggsTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, debugLo),
+            gggsTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, debugMid),
+            gggsTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, debugHi),
             static_cast<float>(ray.gggsLastContributor)};
         if (ray.transmittance > MinTransmittanceForDepth) {
             ray.gggsDebug.z = 2.0f;
-            ray.hitT = 0.0f;
             return;
         }
-        float logT[Split + 1];
+        float T[Split + 1];
         for (int iter = 0; iter < SplitIterations; ++iter) {
             const float interval = (hi - lo) / static_cast<float>(Split);
 #pragma unroll
             for (int i = 0; i <= Split; ++i) {
                 const float t = lo + static_cast<float>(i) * interval;
-                logT[i] = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, t);
+                T[i] = gggsTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, t);
             }
 
-            if ((iter == 0) && ((logT[0] < LogHalf) || (logT[Split] > LogHalf))) {
-                ray.gggsDebug.z = logT[0] < LogHalf ? 3.0f : 4.0f;
-                ray.hitT = 0.0f;
+            if ((iter == 0) && ((T[0] < 0.5f) || (T[Split] > 0.5f))) {
+                ray.gggsDebug.z = T[0] < 0.5f ? 3.0f : 4.0f;
                 return;
             }
 
             int startId = 0;
 #pragma unroll
             for (int i = 1; i < Split; ++i) {
-                startId = logT[i] >= LogHalf ? i : startId;
+                startId = T[i] >= 0.5f ? i : startId;
             }
 
             hi = lo + static_cast<float>(startId + 1) * interval;
             lo = lo + static_cast<float>(startId) * interval;
         }
 
-        const float logLo = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, lo);
-        const float logHi = gggsLogTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, hi);
-        const float TLo = expf(logLo);
-        const float THi = expf(logHi);
+        const float TLo = gggsTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, lo);
+        const float THi = gggsTransmittance(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, ray.gggsLastContributor, hi);
         const float wHi = fminf(fmaxf((TLo - 0.5f) / fmaxf(TLo - THi, 1.0e-7f), 0.0f), 1.0f);
         ray.hitT = wHi * hi + (1.0f - wHi) * lo;
         ray.gggsDebug.z = 0.0f;
@@ -672,6 +628,9 @@ struct GUTKBufferRenderer : Params {
             float accumulatedHitT            = 0.0f;
             tcnn::vec3 accumulatedNormal     = tcnn::vec3::zero();
             uint32_t accumulatedHitCount     = 0;
+            uint32_t accumulatedLastContributor = 0;
+            uint32_t depthInitContributor = 0;
+            float depthInitCandidate = 0.0f;
 
             // Only accumulate contributions before (and including) termination point
             bool shouldContribute = validHit && (!shouldTerminate || laneId <= terminationLane);
@@ -689,6 +648,11 @@ struct GUTKBufferRenderer : Params {
                 accumulatedHitT     = hitT * hitWeight;
                 accumulatedNormal   = hitNormal * hitWeight;
                 accumulatedHitCount = (hitWeight > 0.0f) ? 1 : 0;
+                accumulatedLastContributor = j + 1;
+                if (particleTransmittance > 0.5f) {
+                    depthInitContributor = j + 1;
+                    depthInitCandidate = hitT;
+                }
             }
 
             // Step 6: Warp-level reduction (tree-based sum)
@@ -704,6 +668,15 @@ struct GUTKBufferRenderer : Params {
                 accumulatedNormal.y += __shfl_down_sync(WarpMask, accumulatedNormal.y, offset);
                 accumulatedNormal.z += __shfl_down_sync(WarpMask, accumulatedNormal.z, offset);
                 accumulatedHitCount += __shfl_down_sync(WarpMask, accumulatedHitCount, offset);
+
+                const uint32_t otherLastContributor = __shfl_down_sync(WarpMask, accumulatedLastContributor, offset);
+                accumulatedLastContributor = accumulatedLastContributor > otherLastContributor ? accumulatedLastContributor : otherLastContributor;
+                const uint32_t otherDepthInitContributor = __shfl_down_sync(WarpMask, depthInitContributor, offset);
+                const float otherDepthInitCandidate = __shfl_down_sync(WarpMask, depthInitCandidate, offset);
+                if (otherDepthInitContributor > depthInitContributor) {
+                    depthInitContributor = otherDepthInitContributor;
+                    depthInitCandidate = otherDepthInitCandidate;
+                }
             }
 
             // Step 7: Only lane 0 updates ray state (avoid race conditions)
@@ -714,6 +687,10 @@ struct GUTKBufferRenderer : Params {
                 ray.hitT += accumulatedHitT;
                 ray.normal += accumulatedNormal;
                 ray.countHit(accumulatedHitCount);
+                ray.gggsLastContributor = ray.gggsLastContributor > accumulatedLastContributor ? ray.gggsLastContributor : accumulatedLastContributor;
+                if (depthInitContributor > 0) {
+                    ray.depthInitT = depthInitCandidate;
+                }
             }
 
             // Step 8: Update ray transmittance
@@ -723,6 +700,10 @@ struct GUTKBufferRenderer : Params {
             if (shouldTerminate) {
                 break;
             }
+        }
+
+        if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
+            resolveGGGSMedianDepth(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr);
         }
     }
 
