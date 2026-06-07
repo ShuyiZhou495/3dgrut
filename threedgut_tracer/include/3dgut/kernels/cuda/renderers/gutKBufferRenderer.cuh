@@ -27,6 +27,12 @@ struct HitParticle {
     tcnn::vec3 normal                  = tcnn::vec3::zero();
 };
 
+struct GGGSInitCandidate {
+    float tPeak = 0.0f;
+    float alpha = 0.0f;
+    uint32_t contributor = 0;
+};
+
 template <int K>
 struct HitParticleKBuffer {
     __device__ HitParticleKBuffer() {
@@ -351,12 +357,13 @@ struct GUTKBufferRenderer : Params {
             return;
         }
 
+        const float fallbackDepthInitT = ray.depthInitT;
         ray.depthInitT = 0.0f;
         ray.gggsLastContributor = 0;
-        float transmittance = 1.0f;
+        constexpr int MaxInitCandidates = 128;
+        GGGSInitCandidate candidates[MaxInitCandidates];
+        int numCandidates = 0;
         uint32_t contributor = 0;
-        uint32_t lastContributor = 0;
-        float depthInitT = 0.0f;
 
         for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
             const uint32_t particleIdx = sortedTileParticleIdxPtr[sortedIndex];
@@ -369,6 +376,17 @@ struct GUTKBufferRenderer : Params {
             }
 
             const auto densityParameters = particles.fetchDensityParameters(particleIdx);
+            float rgbAlpha = 0.0f;
+            float rgbHitT = 0.0f;
+            if (!particles.densityHit(ray.origin,
+                                      ray.direction,
+                                      densityParameters,
+                                      rgbAlpha,
+                                      rgbHitT,
+                                      nullptr)) {
+                continue;
+            }
+
             threedgut::GGGSRayProfile profile;
             if (!particles.gggsDepthProfile(ray.origin,
                                             ray.direction,
@@ -380,11 +398,43 @@ struct GUTKBufferRenderer : Params {
                 continue;
             }
 
-            if (transmittance > 0.5f) {
-                depthInitT = profile.tPeak;
+            if ((rgbAlpha < Params::AlphaThreshold) ||
+                (rgbHitT <= ray.tMinMax.x) ||
+                (rgbHitT >= ray.tMinMax.y) ||
+                (profile.tPeak <= ray.tMinMax.x) ||
+                (profile.tPeak >= ray.tMinMax.y)) {
+                continue;
             }
-            transmittance *= (1.0f - profile.alphaPeak);
-            lastContributor = contributor;
+
+            const GGGSInitCandidate candidate = {profile.tPeak, rgbAlpha, contributor};
+            int insertIdx = numCandidates;
+            if (numCandidates < MaxInitCandidates) {
+                numCandidates++;
+            } else if (candidate.tPeak >= candidates[MaxInitCandidates - 1].tPeak) {
+                continue;
+            } else {
+                insertIdx = MaxInitCandidates - 1;
+            }
+
+            for (; (insertIdx > 0) && (candidate.tPeak < candidates[insertIdx - 1].tPeak); --insertIdx) {
+                candidates[insertIdx] = candidates[insertIdx - 1];
+            }
+            candidates[insertIdx] = candidate;
+        }
+
+        float transmittance = 1.0f;
+        float depthInitT = 0.0f;
+        uint32_t lastContributor = 0;
+        for (int i = 0; i < numCandidates; ++i) {
+            if (transmittance > 0.5f) {
+                depthInitT = candidates[i].tPeak;
+                lastContributor = candidates[i].contributor;
+            }
+            const float nextTransmittance = transmittance * (1.0f - candidates[i].alpha);
+            if ((transmittance > 0.5f) && (nextTransmittance <= 0.5f)) {
+                break;
+            }
+            transmittance = nextTransmittance;
             if (transmittance < Particles::MinTransmittanceThreshold) {
                 break;
             }
@@ -393,6 +443,8 @@ struct GUTKBufferRenderer : Params {
         if (lastContributor > 0) {
             ray.depthInitT = depthInitT;
             ray.gggsLastContributor = lastContributor;
+        } else if (fallbackDepthInitT > ray.tMinMax.x) {
+            ray.depthInitT = fallbackDepthInitT;
         }
     }
 
@@ -585,6 +637,7 @@ struct GUTKBufferRenderer : Params {
 
         if constexpr (!Backward) {
             if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
+                initializeGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
                 resolveGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
             }
         }
@@ -795,6 +848,7 @@ struct GUTKBufferRenderer : Params {
         }
 
         if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
+            initializeGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
             resolveGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
         }
     }
