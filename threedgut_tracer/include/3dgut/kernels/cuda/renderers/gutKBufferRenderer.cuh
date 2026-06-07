@@ -352,6 +352,7 @@ struct GUTKBufferRenderer : Params {
         }
 
         const float fallbackDepthInitT = ray.depthInitT;
+        const uint32_t fallbackLastContributor = ray.gggsLastContributor;
         ray.depthInitT = 0.0f;
         ray.gggsLastContributor = 0;
         float transmittance = 1.0f;
@@ -415,6 +416,7 @@ struct GUTKBufferRenderer : Params {
             ray.gggsLastContributor = lastContributor;
         } else if (fallbackDepthInitT > ray.tMinMax.x) {
             ray.depthInitT = fallbackDepthInitT;
+            ray.gggsLastContributor = fallbackLastContributor;
         }
     }
 
@@ -435,7 +437,7 @@ struct GUTKBufferRenderer : Params {
         constexpr int MaxBracketExpansions = 5;
         constexpr int Split = 8;
         constexpr int SplitIterations = 5;
-        constexpr uint32_t AllPixelCandidates = 0;
+        const uint32_t searchLastContributor = ray.gggsLastContributor;
         const float finalTransmittance = gggsTransmittance(ray,
                                                            params,
                                                            particles,
@@ -443,7 +445,7 @@ struct GUTKBufferRenderer : Params {
                                                            sortedTileParticleIdxPtr,
                                                            particlesProjectedPositionPtr,
                                                            particlesProjectedConicOpacityPtr,
-                                                           AllPixelCandidates,
+                                                           searchLastContributor,
                                                            ray.tMinMax.y);
         ray.gggsDebug = {ray.depthInitT, finalTransmittance, 0.0f, 0.0f};
         if (ray.depthInitT <= ray.tMinMax.x) {
@@ -461,9 +463,9 @@ struct GUTKBufferRenderer : Params {
         const float debugMid = ray.depthInitT;
         const float debugHi = hi;
         ray.gggsTransmittanceDebug = {
-            gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, AllPixelCandidates, debugLo),
-            gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, AllPixelCandidates, debugMid),
-            gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, AllPixelCandidates, debugHi),
+            gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, debugLo),
+            gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, debugMid),
+            gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, debugHi),
             static_cast<float>(ray.gggsLastContributor)};
         if (finalTransmittance > MinTransmittanceForDepth) {
             ray.gggsDebug.z = 2.0f;
@@ -481,8 +483,8 @@ struct GUTKBufferRenderer : Params {
             sampleRange *= 2.0f;
             lo = fmaxf(ray.depthInitT - sampleRange, ray.tMinMax.x);
             hi = fminf(ray.depthInitT + sampleRange, ray.tMinMax.y);
-            bracketTLo = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, AllPixelCandidates, lo);
-            bracketTHi = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, AllPixelCandidates, hi);
+            bracketTLo = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, lo);
+            bracketTHi = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, hi);
             bracketed = (bracketTLo >= 0.5f) && (bracketTHi <= 0.5f);
         }
 
@@ -497,7 +499,7 @@ struct GUTKBufferRenderer : Params {
 #pragma unroll
             for (int i = 0; i <= Split; ++i) {
                 const float t = lo + static_cast<float>(i) * interval;
-                T[i] = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, AllPixelCandidates, t);
+                T[i] = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, t);
             }
 
             int startId = 0;
@@ -510,8 +512,8 @@ struct GUTKBufferRenderer : Params {
             lo = lo + static_cast<float>(startId) * interval;
         }
 
-        const float TLo = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, AllPixelCandidates, lo);
-        const float THi = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, AllPixelCandidates, hi);
+        const float TLo = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, lo);
+        const float THi = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, hi);
         const float wHi = fminf(fmaxf((TLo - 0.5f) / fmaxf(TLo - THi, 1.0e-7f), 0.0f), 1.0f);
         ray.hitT = wHi * hi + (1.0f - wHi) * lo;
         ray.gggsDebug.z = 0.0f;
@@ -838,8 +840,7 @@ struct GUTKBufferRenderer : Params {
             return 0.0f;
         }
 
-        constexpr uint32_t AllPixelCandidates = 0;
-        const float dLogTDt = gggsLogTransmittanceDepthDerivative(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, AllPixelCandidates, ray.hitTBackward);
+        const float dLogTDt = gggsLogTransmittanceDepthDerivative(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, ray.gggsLastContributor, ray.hitTBackward);
         if (fabsf(dLogTDt) < 1.0e-7f) {
             return 0.0f;
         }
@@ -889,7 +890,9 @@ struct GUTKBufferRenderer : Params {
                     if (particleData.idx == GUTParameters::InvalidParticleIdx) {
                         break;
                     }
-                    if (!gggsPixelCandidate(params, ray, particleData.idx, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr)) {
+                    const uint32_t contributor = i * GUTParameters::Tiling::BlockSize + j + 1;
+                    if (((ray.gggsLastContributor > 0) && (contributor > ray.gggsLastContributor)) ||
+                        !gggsPixelCandidate(params, ray, particleData.idx, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr)) {
                         continue;
                     }
 
