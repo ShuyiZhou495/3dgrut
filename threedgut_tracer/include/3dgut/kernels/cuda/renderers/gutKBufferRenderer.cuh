@@ -340,13 +340,23 @@ struct GUTKBufferRenderer : Params {
     }
 
     template <typename TRay>
-    static inline __device__ uint32_t gggsReplayLastContributor(TRay& ray,
-                                                                Particles& particles,
-                                                                const tcnn::uvec2& tileParticleRangeIndices,
-                                                                const uint32_t* __restrict__ sortedTileParticleIdxPtr) {
+    static inline __device__ void initializeGGGSMedianDepth(TRay& ray,
+                                                            const threedgut::RenderParameters& params,
+                                                            Particles& particles,
+                                                            const tcnn::uvec2& tileParticleRangeIndices,
+                                                            const uint32_t* __restrict__ sortedTileParticleIdxPtr,
+                                                            const tcnn::vec2* __restrict__ particlesProjectedPositionPtr,
+                                                            const tcnn::vec4* __restrict__ particlesProjectedConicOpacityPtr) {
+        if (!ray.isValid()) {
+            return;
+        }
+
+        ray.depthInitT = 0.0f;
+        ray.gggsLastContributor = 0;
         float transmittance = 1.0f;
         uint32_t contributor = 0;
         uint32_t lastContributor = 0;
+        float depthInitT = 0.0f;
 
         for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
             const uint32_t particleIdx = sortedTileParticleIdxPtr[sortedIndex];
@@ -354,28 +364,36 @@ struct GUTKBufferRenderer : Params {
                 break;
             }
             contributor++;
+            if (!gggsPixelCandidate(params, ray, particleIdx, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr)) {
+                continue;
+            }
 
             const auto densityParameters = particles.fetchDensityParameters(particleIdx);
-            float hitAlpha = 0.0f;
-            float hitT = 0.0f;
-            tcnn::vec3 hitNormal = tcnn::vec3::zero();
-            if (particles.densityHit(ray.origin,
-                                     ray.direction,
-                                     densityParameters,
-                                     hitAlpha,
-                                     hitT,
-                                     &hitNormal) &&
-                (hitT > ray.tMinMax.x) &&
-                (hitT < ray.tMinMax.y)) {
-                lastContributor = contributor;
-                transmittance *= (1.0f - hitAlpha);
-                if (transmittance < Particles::MinTransmittanceThreshold) {
-                    break;
-                }
+            threedgut::GGGSRayProfile profile;
+            if (!particles.gggsDepthProfile(ray.origin,
+                                            ray.direction,
+                                            densityParameters,
+                                            ray.tMinMax.x,
+                                            ray.tMinMax.y,
+                                            true,
+                                            profile)) {
+                continue;
+            }
+
+            if (transmittance > 0.5f) {
+                depthInitT = profile.tPeak;
+            }
+            transmittance *= (1.0f - profile.alphaPeak);
+            lastContributor = contributor;
+            if (transmittance < Particles::MinTransmittanceThreshold) {
+                break;
             }
         }
 
-        return lastContributor;
+        if (lastContributor > 0) {
+            ray.depthInitT = depthInitT;
+            ray.gggsLastContributor = lastContributor;
+        }
     }
 
     template <typename TRay>
@@ -392,9 +410,19 @@ struct GUTKBufferRenderer : Params {
 
         constexpr float SampleRange = 0.4f;
         constexpr float MinTransmittanceForDepth = 0.45f;
+        constexpr int MaxBracketExpansions = 5;
         constexpr int Split = 8;
         constexpr int SplitIterations = 5;
-        ray.gggsDebug = {ray.depthInitT, ray.transmittance, 0.0f, 0.0f};
+        const float finalTransmittance = gggsTransmittance(ray,
+                                                           params,
+                                                           particles,
+                                                           tileParticleRangeIndices,
+                                                           sortedTileParticleIdxPtr,
+                                                           particlesProjectedPositionPtr,
+                                                           particlesProjectedConicOpacityPtr,
+                                                           ray.gggsLastContributor,
+                                                           ray.tMinMax.y);
+        ray.gggsDebug = {ray.depthInitT, finalTransmittance, 0.0f, 0.0f};
         if (ray.depthInitT <= ray.tMinMax.x) {
             ray.gggsDebug.z = 1.0f;
             return;
@@ -414,10 +442,32 @@ struct GUTKBufferRenderer : Params {
             gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, ray.gggsLastContributor, debugMid),
             gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, ray.gggsLastContributor, debugHi),
             static_cast<float>(ray.gggsLastContributor)};
-        if (ray.transmittance > MinTransmittanceForDepth) {
+        if (finalTransmittance > MinTransmittanceForDepth) {
             ray.gggsDebug.z = 2.0f;
             return;
         }
+
+        float bracketTLo = ray.gggsTransmittanceDebug.x;
+        float bracketTHi = ray.gggsTransmittanceDebug.z;
+        float sampleRange = SampleRange;
+        bool bracketed = (bracketTLo >= 0.5f) && (bracketTHi <= 0.5f);
+        for (int expand = 0; !bracketed && (expand < MaxBracketExpansions); ++expand) {
+            if ((lo <= ray.tMinMax.x) && (hi >= ray.tMinMax.y)) {
+                break;
+            }
+            sampleRange *= 2.0f;
+            lo = fmaxf(ray.depthInitT - sampleRange, ray.tMinMax.x);
+            hi = fminf(ray.depthInitT + sampleRange, ray.tMinMax.y);
+            bracketTLo = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, ray.gggsLastContributor, lo);
+            bracketTHi = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, ray.gggsLastContributor, hi);
+            bracketed = (bracketTLo >= 0.5f) && (bracketTHi <= 0.5f);
+        }
+
+        if (!bracketed) {
+            ray.gggsDebug.z = bracketTLo < 0.5f ? 3.0f : 4.0f;
+            return;
+        }
+
         float T[Split + 1];
         for (int iter = 0; iter < SplitIterations; ++iter) {
             const float interval = (hi - lo) / static_cast<float>(Split);
@@ -425,11 +475,6 @@ struct GUTKBufferRenderer : Params {
             for (int i = 0; i <= Split; ++i) {
                 const float t = lo + static_cast<float>(i) * interval;
                 T[i] = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, ray.gggsLastContributor, t);
-            }
-
-            if ((iter == 0) && ((T[0] < 0.5f) || (T[Split] > 0.5f))) {
-                ray.gggsDebug.z = T[0] < 0.5f ? 3.0f : 4.0f;
-                return;
             }
 
             int startId = 0;
@@ -539,6 +584,7 @@ struct GUTKBufferRenderer : Params {
 
         if constexpr (!Backward) {
             if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
+                initializeGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
                 resolveGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
             }
         }
@@ -749,6 +795,7 @@ struct GUTKBufferRenderer : Params {
         }
 
         if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
+            initializeGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
             resolveGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
         }
     }
@@ -794,7 +841,7 @@ struct GUTKBufferRenderer : Params {
         using namespace threedgut;
         __shared__ PrefetchedRawParticleData prefetchedRawParticlesData[GUTParameters::Tiling::BlockSize];
         if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
-            ray.gggsLastContributor = gggsReplayLastContributor(ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr);
+            initializeGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
         }
         const float gggsDepthGamma = gggsDepthBackwardGamma(params, ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
         const float expectedDepthGradient = params.depthMode == threedgut::RenderParameters::GGGSMedianDepth ? 0.0f : ray.hitTGradient;
