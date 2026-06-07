@@ -585,7 +585,6 @@ struct GUTKBufferRenderer : Params {
 
         if constexpr (!Backward) {
             if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
-                initializeGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
                 resolveGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
             }
         }
@@ -796,7 +795,6 @@ struct GUTKBufferRenderer : Params {
         }
 
         if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
-            initializeGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
             resolveGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
         }
     }
@@ -842,9 +840,6 @@ struct GUTKBufferRenderer : Params {
 
         using namespace threedgut;
         __shared__ PrefetchedRawParticleData prefetchedRawParticlesData[GUTParameters::Tiling::BlockSize];
-        if (params.depthMode == threedgut::RenderParameters::GGGSMedianDepth) {
-            initializeGGGSMedianDepth(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
-        }
         const float gggsDepthGamma = gggsDepthBackwardGamma(params, ray, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr);
         const float expectedDepthGradient = params.depthMode == threedgut::RenderParameters::GGGSMedianDepth ? 0.0f : ray.hitTGradient;
 
