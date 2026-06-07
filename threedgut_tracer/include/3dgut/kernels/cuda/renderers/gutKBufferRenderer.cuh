@@ -279,16 +279,20 @@ struct GUTKBufferRenderer : Params {
                                                ray.tMinMax.x,
                                                ray.tMinMax.y,
                                                profile)) {
-            return false;
+            profile.A = 1.0f;
+            profile.d2Min = 0.0f;
+            profile.responsePeak = 1.0f;
+            profile.density = 1.0f;
         }
 
-        if ((profile.tPeak <= ray.tMinMax.x) ||
-            (profile.tPeak >= ray.tMinMax.y)) {
-            return false;
-        }
-
+        profile.tPeak = rgbHitT;
         profile.alphaPeak = fminf(0.99f, fmaxf(0.0f, rgbAlpha));
         return true;
+    }
+
+    static inline __device__ float gggsRenderPathStepTransmittance(const threedgut::GGGSRayProfile& profile,
+                                                                   const float depth) {
+        return depth > profile.tPeak ? (1.0f - profile.alphaPeak) : 1.0f;
     }
 
     template <typename TRay>
@@ -322,7 +326,7 @@ struct GUTKBufferRenderer : Params {
                 continue;
             }
 
-            transmittance *= particles.gggsDepthProfileTransmittance(profile, depth);
+            transmittance *= gggsRenderPathStepTransmittance(profile, depth);
         }
 
         return transmittance;
@@ -478,7 +482,6 @@ struct GUTKBufferRenderer : Params {
 
         constexpr float SampleRange = 0.4f;
         constexpr float MinTransmittanceForDepth = 0.45f;
-        constexpr int MaxBracketExpansions = 5;
         constexpr int Split = 8;
         constexpr int SplitIterations = 5;
         constexpr float MonoTolerance = 1.0e-4f;
@@ -501,7 +504,9 @@ struct GUTKBufferRenderer : Params {
         float lo = fmaxf(ray.depthInitT - SampleRange, ray.tMinMax.x);
         float hi = fminf(ray.depthInitT + SampleRange, ray.tMinMax.y);
         if (hi <= lo) {
-            ray.gggsDebug.z = 1.0f;
+            ray.hitT = ray.depthInitT;
+            ray.gggsDebug.z = 0.0f;
+            ray.gggsDebug.w = 0.0f;
             return;
         }
 
@@ -517,32 +522,21 @@ struct GUTKBufferRenderer : Params {
                        (ray.gggsTransmittanceDebug.z > ray.gggsTransmittanceDebug.y + MonoTolerance);
         ray.gggsSearchDebug.y = monoBad ? 1.0f : 0.0f;
         if (finalTransmittance > MinTransmittanceForDepth) {
-            ray.gggsDebug.z = 2.0f;
+            ray.hitT = ray.depthInitT;
+            ray.gggsDebug.z = 0.0f;
+            ray.gggsDebug.w = 0.0f;
             return;
         }
 
         float bracketTLo = ray.gggsTransmittanceDebug.x;
         float bracketTHi = ray.gggsTransmittanceDebug.z;
-        float sampleRange = SampleRange;
         bool bracketed = (bracketTLo >= 0.5f) && (bracketTHi <= 0.5f);
         ray.gggsSearchDebug.x = bracketed ? 1.0f : 0.0f;
-        for (int expand = 0; !bracketed && (expand < MaxBracketExpansions); ++expand) {
-            if ((lo <= ray.tMinMax.x) && (hi >= ray.tMinMax.y)) {
-                break;
-            }
-            sampleRange *= 2.0f;
-            lo = fmaxf(ray.depthInitT - sampleRange, ray.tMinMax.x);
-            hi = fminf(ray.depthInitT + sampleRange, ray.tMinMax.y);
-            bracketTLo = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, lo);
-            bracketTHi = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, hi);
-            monoBad = monoBad || (bracketTHi > bracketTLo + MonoTolerance);
-            bracketed = (bracketTLo >= 0.5f) && (bracketTHi <= 0.5f);
-        }
-        ray.gggsSearchDebug.x = bracketed ? 1.0f : 0.0f;
-        ray.gggsSearchDebug.y = monoBad ? 1.0f : 0.0f;
 
         if (!bracketed) {
-            ray.gggsDebug.z = bracketTLo < 0.5f ? 3.0f : 4.0f;
+            ray.hitT = ray.depthInitT;
+            ray.gggsDebug.z = 0.0f;
+            ray.gggsDebug.w = 0.0f;
             return;
         }
 
@@ -571,7 +565,15 @@ struct GUTKBufferRenderer : Params {
         const float TLo = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, lo);
         const float THi = gggsTransmittance(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, hi);
         monoBad = monoBad || (THi > TLo + MonoTolerance);
-        const float wHi = fminf(fmaxf((TLo - 0.5f) / fmaxf(TLo - THi, 1.0e-7f), 0.0f), 1.0f);
+        const float denom = TLo - THi;
+        if (denom <= 1.0e-7f) {
+            ray.hitT = ray.depthInitT;
+            ray.gggsDebug.z = 0.0f;
+            ray.gggsDebug.w = 0.0f;
+            ray.gggsSearchDebug = {1.0f, monoBad ? 1.0f : 0.0f, 0.0f, -1.0f};
+            return;
+        }
+        const float wHi = fminf(fmaxf((TLo - 0.5f) / denom, 0.0f), 1.0f);
         ray.hitT = wHi * hi + (1.0f - wHi) * lo;
         const float dLogTDt = gggsLogTransmittanceDepthDerivative(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, ray.hitT);
         const tcnn::vec2 dominant = gggsDominantDepthDerivativeContributor(ray, params, particles, tileParticleRangeIndices, sortedTileParticleIdxPtr, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr, searchLastContributor, ray.hitT);
