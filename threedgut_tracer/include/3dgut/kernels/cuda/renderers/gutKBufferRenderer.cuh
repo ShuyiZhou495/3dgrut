@@ -27,12 +27,6 @@ struct HitParticle {
     tcnn::vec3 normal                  = tcnn::vec3::zero();
 };
 
-struct GGGSInitCandidate {
-    float tPeak = 0.0f;
-    float alpha = 0.0f;
-    uint32_t contributor = 0;
-};
-
 template <int K>
 struct HitParticleKBuffer {
     __device__ HitParticleKBuffer() {
@@ -360,9 +354,9 @@ struct GUTKBufferRenderer : Params {
         const float fallbackDepthInitT = ray.depthInitT;
         ray.depthInitT = 0.0f;
         ray.gggsLastContributor = 0;
-        constexpr int MaxInitCandidates = 128;
-        GGGSInitCandidate candidates[MaxInitCandidates];
-        int numCandidates = 0;
+        float transmittance = 1.0f;
+        float depthInitT = 0.0f;
+        uint32_t lastContributor = 0;
         uint32_t contributor = 0;
 
         for (uint32_t sortedIndex = tileParticleRangeIndices.x; sortedIndex < tileParticleRangeIndices.y; ++sortedIndex) {
@@ -371,9 +365,6 @@ struct GUTKBufferRenderer : Params {
                 break;
             }
             contributor++;
-            if (!gggsPixelCandidate(params, ray, particleIdx, particlesProjectedPositionPtr, particlesProjectedConicOpacityPtr)) {
-                continue;
-            }
 
             const auto densityParameters = particles.fetchDensityParameters(particleIdx);
             float rgbAlpha = 0.0f;
@@ -388,13 +379,12 @@ struct GUTKBufferRenderer : Params {
             }
 
             threedgut::GGGSRayProfile profile;
-            if (!particles.gggsDepthProfile(ray.origin,
-                                            ray.direction,
-                                            densityParameters,
-                                            ray.tMinMax.x,
-                                            ray.tMinMax.y,
-                                            true,
-                                            profile)) {
+            if (!particles.gggsDepthProfileForInit(ray.origin,
+                                                   ray.direction,
+                                                   densityParameters,
+                                                   ray.tMinMax.x,
+                                                   ray.tMinMax.y,
+                                                   profile)) {
                 continue;
             }
 
@@ -406,31 +396,11 @@ struct GUTKBufferRenderer : Params {
                 continue;
             }
 
-            const GGGSInitCandidate candidate = {profile.tPeak, rgbAlpha, contributor};
-            int insertIdx = numCandidates;
-            if (numCandidates < MaxInitCandidates) {
-                numCandidates++;
-            } else if (candidate.tPeak >= candidates[MaxInitCandidates - 1].tPeak) {
-                continue;
-            } else {
-                insertIdx = MaxInitCandidates - 1;
-            }
-
-            for (; (insertIdx > 0) && (candidate.tPeak < candidates[insertIdx - 1].tPeak); --insertIdx) {
-                candidates[insertIdx] = candidates[insertIdx - 1];
-            }
-            candidates[insertIdx] = candidate;
-        }
-
-        float transmittance = 1.0f;
-        float depthInitT = 0.0f;
-        uint32_t lastContributor = 0;
-        for (int i = 0; i < numCandidates; ++i) {
             if (transmittance > 0.5f) {
-                depthInitT = candidates[i].tPeak;
-                lastContributor = candidates[i].contributor;
+                depthInitT = profile.tPeak;
+                lastContributor = contributor;
             }
-            const float nextTransmittance = transmittance * (1.0f - candidates[i].alpha);
+            const float nextTransmittance = transmittance * (1.0f - rgbAlpha);
             if ((transmittance > 0.5f) && (nextTransmittance <= 0.5f)) {
                 break;
             }
